@@ -31,6 +31,7 @@ import {
 
 import { JOURNAL_DIR, atomicWrite } from './paths.ts';
 import { buildEvaluation } from './optionStats.ts';
+import { readJsonl } from './storage.ts';
 const TRADE_OPTIONS_FILE = path.join(JOURNAL_DIR, 'trade_options.jsonl');
 const HOUR = 3_600_000;
 // Tope conservador: el edge direccional no está validado (AUC ≈ 0,51 en /api/results).
@@ -328,12 +329,7 @@ function evaluateOnPaths(
 }
 
 export function loadRegisteredTradeOptions(): RegisteredTradeOption[] {
-  if (!fs.existsSync(TRADE_OPTIONS_FILE)) return [];
-  const raw = fs.readFileSync(TRADE_OPTIONS_FILE, 'utf-8');
-  return raw
-    .split('\n')
-    .filter((l) => l.trim().length > 0)
-    .map((l) => JSON.parse(l) as RegisteredTradeOption);
+  return readJsonl<RegisteredTradeOption>(TRADE_OPTIONS_FILE);
 }
 
 function writeRegisteredTradeOptions(rows: RegisteredTradeOption[]) {
@@ -1082,7 +1078,21 @@ export async function computeTradeOptions(
     }
 
     // Evaluate all open registered options for this asset against latest 1H candles
-    const { all: evaluatedAll } = evaluateTradeOptionsWithCandles(asset, candles1h);
+    // Si la app estuvo apagada mucho tiempo, hay opciones pendientes más antiguas que la ventana de velas:
+    // se descarga el histórico necesario para evaluarlas (hasta ~5 meses).
+    let evalCandles = candles1h;
+    const pendingTs = loadRegisteredTradeOptions()
+      .filter((r) => r.asset === asset && (r.status === 'open' || !r.horizonDone))
+      .map((r) => r.createdTs);
+    if (pendingTs.length && candles1h.length && Math.min(...pendingTs) < candles1h[0][0]) {
+      const need = Math.ceil((Date.now() - Math.min(...pendingTs)) / HOUR) + 24;
+      try {
+        evalCandles = await fetchOkxCandles(asset, '1H', Math.min(4000, need), refresh);
+      } catch (e) {
+        console.warn(`No se pudo ampliar el histórico de velas (${asset}):`, e);
+      }
+    }
+    const { all: evaluatedAll } = evaluateTradeOptionsWithCandles(asset, evalCandles);
     const registered = [...evaluatedAll].sort((a, b) => b.createdTs - a.createdTs);
 
     const out: TradeOptionsResponse = {

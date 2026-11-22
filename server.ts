@@ -45,6 +45,7 @@ import {
   stopMicroCollector,
 } from './server/microService.ts';
 import { getRotationAnalysis } from './server/rotationService.ts';
+import { backupData, dataStatus, heartbeat, migrateLegacyData, readSettings, startSession } from './server/storage.ts';
 import {
   closeRegisteredTradeOptionManual,
   contextOf,
@@ -307,6 +308,25 @@ async function startServer() {
     } catch (err) {
       console.error('Trade options error:', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to compute trade options' });
+    }
+  });
+
+  // Estado de los datos guardados: dónde están, cuántos hay, huecos por apagados y copias de seguridad.
+  app.get('/api/data-status', (_req, res) => {
+    try {
+      const opts = loadRegisteredTradeOptions();
+      const preds = (['btc', 'eth', 'sol'] as AssetId[]).flatMap((a) => loadJournalPredictions(a));
+      const stamps = [...opts.map((o) => o.createdTs), ...preds.map((p) => p.anchor_ts)];
+      res.json(
+        dataStatus({
+          options: opts.length,
+          predictions: preds.length,
+          firstRecordTs: stamps.length ? Math.min(...stamps) : null,
+        }),
+      );
+    } catch (err) {
+      console.error('Data status error:', err);
+      res.status(500).json({ error: 'Failed to read data status' });
     }
   });
 
@@ -630,8 +650,31 @@ async function startServer() {
     });
   }
 
-  app.listen(3000, '0.0.0.0', () => {
-    console.log('Trading Predictor server listening on http://0.0.0.0:3000');
+  // Arranque: recupera datos de versiones antiguas, registra la sesión (para medir huecos por apagados)
+  // y hace copia de seguridad. Los datos de ejecuciones anteriores se conservan siempre.
+  migrateLegacyData();
+  const { gapMs } = startSession();
+  backupData();
+  setInterval(heartbeat, 60_000);
+  setInterval(backupData, 6 * 3_600_000);
+  const shutdown = () => {
+    heartbeat();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+
+  const PORT = Number(process.env.PORT || 3000);
+  const HOST = process.env.HOST || '0.0.0.0';
+  app.listen(PORT, HOST, () => {
+    console.log(`Trading Predictor server listening on http://${HOST}:${PORT}`);
+    if (gapMs !== null && gapMs > 3_600_000) {
+      console.log(`La app estuvo apagada ${(gapMs / 3_600_000).toFixed(1)} h; se retoma la recopilación y se evalúan las opciones pendientes.`);
+    }
+    const micro = readSettings().micro;
+    if (micro?.running) {
+      void startMicroCollector(micro.asset).catch((e) => console.warn('No se pudo reanudar el colector micro:', e));
+    }
     startAutoJournalScheduler();
     setTimeout(() => {
       void ensureAutoTradeOptionsForAllAssets();

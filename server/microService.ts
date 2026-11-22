@@ -3,11 +3,12 @@ import path from 'path';
 import zlib from 'zlib';
 import { getInstId } from './marketData.ts';
 import type { AssetId, CollectorStatus, MicroTick } from './types.ts';
-import { JOURNAL_DIR } from './paths.ts';
+import { DATA_DIR, JOURNAL_DIR } from './paths.ts';
+import { updateSettings } from './storage.ts';
 
 const OKX_API = 'https://www.okx.com/api/v5';
 const MICRO_ARCHIVE_DIR = path.join(JOURNAL_DIR, 'micro');
-const MICRO_LIVE_DIR = path.resolve(process.cwd(), 'data', 'micro');
+const MICRO_LIVE_DIR = path.join(DATA_DIR, 'micro');
 const liveBuffer: MicroTick[] = [];
 
 export function pushLiveMicroTick(tick: MicroTick) {
@@ -250,6 +251,7 @@ export async function startMicroCollector(asset: AssetId): Promise<CollectorStat
     void writeCollectorBar();
   }, 60_000);
 
+  updateSettings({ micro: { running: true, asset } });
   return getCollectorStatus();
 }
 
@@ -263,6 +265,7 @@ export function stopMicroCollector(): CollectorStatus {
     clearInterval(collector.barTimer);
     collector.barTimer = null;
   }
+  updateSettings({ micro: { running: false, asset: collector.asset } });
   return getCollectorStatus();
 }
 

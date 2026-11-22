@@ -1,5 +1,6 @@
 import React from 'react';
 import { Download } from 'lucide-react';
+import { DataStatusBar } from './DataStatusBar.tsx';
 import type { TradeOptionEvaluation, TradeOptionGroupStats } from '../types.ts';
 
 interface Props {
@@ -116,6 +117,8 @@ export const OptionsEvaluationPanel: React.FC<Props> = ({ evaluation }) => {
           </a>
         </div>
       </div>
+
+      <DataStatusBar />
 
       <div className={`rounded-md border px-3 py-2 text-xs ${VERDICT_STYLES[evaluation.verdict.level]}`}>
         {evaluation.verdict.text}

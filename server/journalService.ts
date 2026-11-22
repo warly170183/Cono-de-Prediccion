@@ -19,6 +19,7 @@ import {
 } from './quantEngine.ts';
 
 import { JOURNAL_DIR, atomicWrite } from './paths.ts';
+import { readJsonl, readSettings, updateSettings } from './storage.ts';
 const HOUR = 3_600_000;
 const HZ = [24, 72] as const;
 const QS = ['5', '10', '25', '50', '75', '90', '95'] as const;
@@ -28,13 +29,7 @@ function predPath(asset: AssetId) {
 }
 
 export function loadJournalPredictions(asset: AssetId): JournalRecord[] {
-  const file = predPath(asset);
-  if (!fs.existsSync(file)) return [];
-  const raw = fs.readFileSync(file, 'utf-8');
-  return raw
-    .split('\n')
-    .filter((l) => l.trim().length > 0)
-    .map((l) => normalizeRecord(asset, JSON.parse(l) as JournalRecord));
+  return readJsonl<JournalRecord>(predPath(asset), (r) => normalizeRecord(asset, r));
 }
 
 /** Compatibilidad: los registros antiguos guardaban el régimen en `hmm`; ahora es `gmm`. */
@@ -342,7 +337,7 @@ export async function exportJournalData(
 // ---------------------------------------------------------------------------
 
 const ALL_ASSETS: AssetId[] = ['btc', 'eth', 'sol'];
-let autoEnabled = true;
+let autoEnabled = readSettings().autoJournal ?? true;
 let autoRunning = false;
 let lastCheckTs: number | null = null;
 let lastSavedTs: number | null = null;
@@ -400,6 +395,7 @@ export async function ensureTodayJournalSnapshots(): Promise<JournalRecord[]> {
 
 export function setAutoJournalEnabled(enabled: boolean): AutoJournalStatus {
   autoEnabled = enabled;
+  updateSettings({ autoJournal: enabled });
   if (enabled) {
     void ensureTodayJournalSnapshots();
   }
