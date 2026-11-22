@@ -1,0 +1,6 @@
+{
+  "name": "Trading Predictor",
+  "description": "Quantitative crypto volatility cones (GJR-GARCH + HAR), Deribit GEX, EV/Kelly trade grid, forward prediction journal, and OKX microstructure analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

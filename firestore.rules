@@ -1,0 +1,262 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    function isAssetId(v) {
+      return v is string && v.size() <= 8 && v in ['btc', 'eth', 'sol'];
+    }
+
+    function isValidUserPrivateInfo(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'createdAt', 'updatedAt'])
+        && data.uid == request.auth.uid
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 120))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPredictionSnapshot(data) {
+      return data.keys().hasAll([
+          'ownerId', 'asset', 'predId', 'anchorTs', 'spot',
+          'volAnnPct', 'volPctile', 'regimeVol', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'asset', 'predId', 'anchorTs', 'spot',
+          'volAnnPct', 'volPctile', 'regimeVol', 'biasAppliedPct',
+          'flags', 'cone', 'coneEns', 'coneOpt', 'ensRatio', 'pUp', 'createdAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && isAssetId(data.asset)
+        && isValidId(data.predId) && data.predId.size() <= 32
+        && data.anchorTs is number && data.anchorTs > 0
+        && data.spot is number && data.spot > 0
+        && data.volAnnPct is number && data.volAnnPct >= 0 && data.volAnnPct <= 1000
+        && data.volPctile is number && data.volPctile >= 0 && data.volPctile <= 100
+        && data.regimeVol is string && data.regimeVol.size() >= 1 && data.regimeVol.size() <= 32
+        && (!('biasAppliedPct' in data) || (data.biasAppliedPct is number && data.biasAppliedPct >= -50 && data.biasAppliedPct <= 50))
+        && (!('flags' in data) || data.flags is map)
+        && (!('cone' in data) || data.cone is map)
+        && (!('coneEns' in data) || data.coneEns is map)
+        && (!('coneOpt' in data) || data.coneOpt == null || data.coneOpt is map)
+        && (!('ensRatio' in data) || data.ensRatio is map)
+        && (!('pUp' in data) || data.pUp is map)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidTradePreset(data) {
+      return data.keys().hasAll([
+          'ownerId', 'asset', 'dir', 'slPct', 'tpPct',
+          'costPct', 'drift24hPct', 'evPct', 'evR', 'kellyPct', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'asset', 'dir', 'slPct', 'tpPct',
+          'costPct', 'drift24hPct', 'evPct', 'evR', 'kellyPct', 'note', 'createdAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && isAssetId(data.asset)
+        && data.dir is string && data.dir.size() <= 8 && data.dir in ['long', 'short']
+        && data.slPct is number && data.slPct > 0 && data.slPct <= 50
+        && data.tpPct is number && data.tpPct > 0 && data.tpPct <= 100
+        && data.costPct is number && data.costPct >= 0 && data.costPct <= 5
+        && data.drift24hPct is number && data.drift24hPct >= -25 && data.drift24hPct <= 25
+        && data.evPct is number
+        && data.evR is number
+        && data.kellyPct is number
+        && (!('note' in data) || (data.note is string && data.note.size() <= 80))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidMicroBar(data) {
+      return data.keys().hasAll([
+          'ownerId', 'asset', 'inst', 'ts', 'mid',
+          'spreadBps', 'micropriceBps', 'tkBuyBtc', 'tkSellBtc', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'asset', 'inst', 'ts', 'mid',
+          'spreadBps', 'micropriceBps', 'imb5', 'basisBps',
+          'tkBuyBtc', 'tkSellBtc', 'createdAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && isAssetId(data.asset)
+        && data.inst is string && data.inst.size() >= 3 && data.inst.size() <= 32
+        && data.ts is number && data.ts > 0
+        && data.mid is number && data.mid > 0
+        && data.spreadBps is number && data.spreadBps >= 0
+        && data.micropriceBps is number
+        && (!('imb5' in data) || data.imb5 == null || data.imb5 is number)
+        && (!('basisBps' in data) || data.basisBps == null || data.basisBps is number)
+        && data.tkBuyBtc is number && data.tkBuyBtc >= 0
+        && data.tkSellBtc is number && data.tkSellBtc >= 0
+        && data.createdAt is timestamp;
+    }
+
+    function isValidTradeOption(data) {
+      return data.keys().hasAll([
+          'ownerId', 'asset', 'strategyKey', 'title', 'dir', 'horizonHours',
+          'createdTs', 'createdIso', 'entryPrice', 'entryLow', 'entryHigh',
+          'stopLoss', 'slPct', 'takeProfit1', 'tp1Pct', 'takeProfit2', 'rr',
+          'probTpPct', 'evPct', 'confluenceScore', 'confidence', 'source',
+          'status', 'summary', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'asset', 'strategyKey', 'title', 'dir', 'horizonHours',
+          'createdTs', 'createdIso', 'entryPrice', 'entryLow', 'entryHigh',
+          'stopLoss', 'slPct', 'takeProfit1', 'tp1Pct', 'takeProfit2', 'rr',
+          'probTpPct', 'evPct', 'confluenceScore', 'confidence', 'source',
+          'status', 'evaluatedTs', 'exitPrice', 'realizedPnlPct',
+          'mfePct', 'maePct', 'summary', 'createdAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && isAssetId(data.asset)
+        && data.strategyKey is string && data.strategyKey.size() >= 1 && data.strategyKey.size() <= 32
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 80
+        && data.dir is string && data.dir.size() <= 8 && data.dir in ['long', 'short']
+        && data.horizonHours is number && data.horizonHours in [24, 72]
+        && data.createdTs is number && data.createdTs > 0
+        && data.createdIso is string && data.createdIso.size() >= 10 && data.createdIso.size() <= 40
+        && data.entryPrice is number && data.entryPrice > 0
+        && data.entryLow is number && data.entryLow > 0
+        && data.entryHigh is number && data.entryHigh > 0
+        && data.stopLoss is number && data.stopLoss > 0
+        && data.slPct is number && data.slPct > 0 && data.slPct <= 50
+        && data.takeProfit1 is number && data.takeProfit1 > 0
+        && data.tp1Pct is number && data.tp1Pct > 0 && data.tp1Pct <= 100
+        && data.takeProfit2 is number && data.takeProfit2 > 0
+        && data.rr is number && data.rr > 0
+        && data.probTpPct is number && data.probTpPct >= 0 && data.probTpPct <= 100
+        && data.evPct is number
+        && data.confluenceScore is number && data.confluenceScore >= 0 && data.confluenceScore <= 100
+        && data.confidence is string && data.confidence.size() <= 16 && data.confidence in ['Alta', 'Media', 'Moderada']
+        && data.source is string && data.source.size() <= 12 && data.source in ['auto', 'manual']
+        && data.status is string && data.status.size() <= 16 && data.status in ['open', 'tp_hit', 'sl_hit', 'expired', 'closed_manual']
+        && data.summary is string && data.summary.size() <= 200
+        && (!('evaluatedTs' in data) || data.evaluatedTs == null || data.evaluatedTs is number)
+        && (!('exitPrice' in data) || data.exitPrice == null || (data.exitPrice is number && data.exitPrice > 0))
+        && (!('realizedPnlPct' in data) || data.realizedPnlPct == null || data.realizedPnlPct is number)
+        && (!('mfePct' in data) || data.mfePct == null || data.mfePct is number)
+        && (!('maePct' in data) || data.maePct == null || data.maePct is number)
+        && data.createdAt is timestamp;
+    }
+
+    // Isolated PII user private info (/users/{userId}/private/info)
+    match /users/{userId}/private/{docId} {
+      allow get: if isOwner(userId) && isValidId(docId) && docId == 'info';
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(docId) && docId == 'info'
+        && isValidUserPrivateInfo(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isOwner(userId) && isValidId(docId) && docId == 'info'
+        && isValidUserPrivateInfo(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // Daily prediction snapshots (/users/{userId}/predictions/{predictionId})
+    match /users/{userId}/predictions/{predictionId} {
+      allow get: if isOwner(userId) && isValidId(predictionId);
+      allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isOwner(userId) && isValidId(predictionId)
+        && isValidPredictionSnapshot(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isOwner(userId) && isValidId(predictionId)
+        && isValidPredictionSnapshot(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().asset == existing().asset
+        && incoming().predId == existing().predId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'anchorTs', 'spot', 'volAnnPct', 'volPctile', 'regimeVol',
+          'biasAppliedPct', 'flags', 'cone', 'coneEns', 'coneOpt', 'ensRatio', 'pUp'
+        ]);
+      allow delete: if isOwner(userId) && isValidId(predictionId);
+    }
+
+    // Saved What-If trade presets (/users/{userId}/tradePresets/{presetId})
+    match /users/{userId}/tradePresets/{presetId} {
+      allow get: if isOwner(userId) && isValidId(presetId);
+      allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isOwner(userId) && isValidId(presetId)
+        && isValidTradePreset(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isOwner(userId) && isValidId(presetId)
+        && isValidTradePreset(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'note', 'slPct', 'tpPct', 'costPct', 'drift24hPct', 'evPct', 'evR', 'kellyPct'
+        ]);
+      allow delete: if isOwner(userId) && isValidId(presetId);
+    }
+
+    // Captured microstructure bars (/users/{userId}/microBars/{barId})
+    match /users/{userId}/microBars/{barId} {
+      allow get: if isOwner(userId) && isValidId(barId);
+      allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isOwner(userId) && isValidId(barId)
+        && isValidMicroBar(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isOwner(userId) && isValidId(barId);
+    }
+
+    // Registered Trading Options (/users/{userId}/tradeOptions/{optionId})
+    match /users/{userId}/tradeOptions/{optionId} {
+      allow get: if isOwner(userId) && isValidId(optionId);
+      allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isOwner(userId) && isValidId(optionId)
+        && isValidTradeOption(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isOwner(userId) && isValidId(optionId)
+        && isValidTradeOption(incoming())
+        && existing().status == 'open'
+        && incoming().ownerId == existing().ownerId
+        && incoming().asset == existing().asset
+        && incoming().strategyKey == existing().strategyKey
+        && incoming().dir == existing().dir
+        && incoming().horizonHours == existing().horizonHours
+        && incoming().createdTs == existing().createdTs
+        && incoming().createdIso == existing().createdIso
+        && incoming().entryPrice == existing().entryPrice
+        && incoming().source == existing().source
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'evaluatedTs', 'exitPrice', 'realizedPnlPct', 'mfePct', 'maePct'
+        ]);
+      allow delete: if isOwner(userId) && isValidId(optionId);
+    }
+  }
+}

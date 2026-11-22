@@ -1,0 +1,402 @@
+{
+  "entities": {
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Authenticated user private profile isolated under /users/{userId}/private/info.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "PredictionSnapshot": {
+      "title": "PredictionSnapshot",
+      "description": "Daily calibrated GJR-GARCH and HAR ensemble probability cone snapshot saved per user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "asset": {
+          "type": "string",
+          "enum": ["btc", "eth", "sol"],
+          "maxLength": 8
+        },
+        "predId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "anchorTs": {
+          "type": "number"
+        },
+        "spot": {
+          "type": "number"
+        },
+        "volAnnPct": {
+          "type": "number"
+        },
+        "volPctile": {
+          "type": "number"
+        },
+        "regimeVol": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "biasAppliedPct": {
+          "type": "number"
+        },
+        "flags": {
+          "type": "object"
+        },
+        "cone": {
+          "type": "object"
+        },
+        "coneEns": {
+          "type": "object"
+        },
+        "coneOpt": {
+          "type": "object"
+        },
+        "ensRatio": {
+          "type": "object"
+        },
+        "pUp": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "asset",
+        "predId",
+        "anchorTs",
+        "spot",
+        "volAnnPct",
+        "volPctile",
+        "regimeVol",
+        "createdAt"
+      ]
+    },
+    "TradePreset": {
+      "title": "TradePreset",
+      "description": "User-saved What-If SL/TP/Fee/Drift scenario from the Trade EV Simulator.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "asset": {
+          "type": "string",
+          "enum": ["btc", "eth", "sol"],
+          "maxLength": 8
+        },
+        "dir": {
+          "type": "string",
+          "enum": ["long", "short"],
+          "maxLength": 8
+        },
+        "slPct": {
+          "type": "number"
+        },
+        "tpPct": {
+          "type": "number"
+        },
+        "costPct": {
+          "type": "number"
+        },
+        "drift24hPct": {
+          "type": "number"
+        },
+        "evPct": {
+          "type": "number"
+        },
+        "evR": {
+          "type": "number"
+        },
+        "kellyPct": {
+          "type": "number"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "asset",
+        "dir",
+        "slPct",
+        "tpPct",
+        "costPct",
+        "drift24hPct",
+        "evPct",
+        "evR",
+        "kellyPct",
+        "createdAt"
+      ]
+    },
+    "MicroBar": {
+      "title": "MicroBar",
+      "description": "Persisted live OKX microstructure snapshot captured by the user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "asset": {
+          "type": "string",
+          "enum": ["btc", "eth", "sol"],
+          "maxLength": 8
+        },
+        "inst": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "ts": {
+          "type": "number"
+        },
+        "mid": {
+          "type": "number"
+        },
+        "spreadBps": {
+          "type": "number"
+        },
+        "micropriceBps": {
+          "type": "number"
+        },
+        "imb5": {
+          "type": "number"
+        },
+        "basisBps": {
+          "type": "number"
+        },
+        "tkBuyBtc": {
+          "type": "number"
+        },
+        "tkSellBtc": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "asset",
+        "inst",
+        "ts",
+        "mid",
+        "spreadBps",
+        "micropriceBps",
+        "tkBuyBtc",
+        "tkSellBtc",
+        "createdAt"
+      ]
+    },
+    "TradeOption": {
+      "title": "TradeOption",
+      "description": "Proposed and registered trading setup generated from market, derivatives, GEX, and technical analysis.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "asset": {
+          "type": "string",
+          "enum": ["btc", "eth", "sol"],
+          "maxLength": 8
+        },
+        "strategyKey": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "dir": {
+          "type": "string",
+          "enum": ["long", "short"],
+          "maxLength": 8
+        },
+        "horizonHours": {
+          "type": "number"
+        },
+        "createdTs": {
+          "type": "number"
+        },
+        "createdIso": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "entryPrice": {
+          "type": "number"
+        },
+        "entryLow": {
+          "type": "number"
+        },
+        "entryHigh": {
+          "type": "number"
+        },
+        "stopLoss": {
+          "type": "number"
+        },
+        "slPct": {
+          "type": "number"
+        },
+        "takeProfit1": {
+          "type": "number"
+        },
+        "tp1Pct": {
+          "type": "number"
+        },
+        "takeProfit2": {
+          "type": "number"
+        },
+        "rr": {
+          "type": "number"
+        },
+        "probTpPct": {
+          "type": "number"
+        },
+        "evPct": {
+          "type": "number"
+        },
+        "confluenceScore": {
+          "type": "number"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["Alta", "Media", "Moderada"],
+          "maxLength": 16
+        },
+        "source": {
+          "type": "string",
+          "enum": ["auto", "manual"],
+          "maxLength": 12
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "tp_hit", "sl_hit", "expired", "closed_manual"],
+          "maxLength": 16
+        },
+        "evaluatedTs": {
+          "type": "number"
+        },
+        "exitPrice": {
+          "type": "number"
+        },
+        "realizedPnlPct": {
+          "type": "number"
+        },
+        "mfePct": {
+          "type": "number"
+        },
+        "maePct": {
+          "type": "number"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "asset",
+        "strategyKey",
+        "title",
+        "dir",
+        "horizonHours",
+        "createdTs",
+        "createdIso",
+        "entryPrice",
+        "entryLow",
+        "entryHigh",
+        "stopLoss",
+        "slPct",
+        "takeProfit1",
+        "tp1Pct",
+        "takeProfit2",
+        "rr",
+        "probTpPct",
+        "evPct",
+        "confluenceScore",
+        "confidence",
+        "source",
+        "status",
+        "summary",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/private/{docId}": {
+      "schema": "UserPrivateInfo",
+      "description": "Private authenticated user profile info (PII isolated under /private)."
+    },
+    "/users/{userId}/predictions/{predictionId}": {
+      "schema": "PredictionSnapshot",
+      "description": "Daily calibrated GJR-GARCH & HAR prediction snapshots persisted per user."
+    },
+    "/users/{userId}/tradePresets/{presetId}": {
+      "schema": "TradePreset",
+      "description": "Custom What-If SL/TP/Fee/Drift trade scenarios saved by the user."
+    },
+    "/users/{userId}/microBars/{barId}": {
+      "schema": "MicroBar",
+      "description": "User-captured live OKX orderbook & flow microstructure snapshots."
+    },
+    "/users/{userId}/tradeOptions/{optionId}": {
+      "schema": "TradeOption",
+      "description": "Proposed and registered trading setups evaluated against market & technical confluence."
+    }
+  }
+}
