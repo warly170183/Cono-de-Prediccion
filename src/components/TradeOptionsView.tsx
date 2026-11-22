@@ -21,6 +21,23 @@ interface Props {
   onDeleteOption: (optionId: string) => void;
 }
 
+const VERDICT_UI: Record<string, { label: string; cls: string }> = {
+  validada: { label: 'Ventaja validada', cls: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' },
+  prometedora: { label: 'Prometedora', cls: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300' },
+  sin_datos: { label: 'Sin datos suficientes', cls: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
+  dudosa: { label: 'Dudosa', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
+  descartada: { label: 'Sin ventaja: no operar', cls: 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300' },
+};
+
+const STRATEGY_TITLES: Record<string, string> = {
+  trend_pullback: 'Continuación de tendencia',
+  mean_reversion: 'Reversión a la media',
+  derivatives_squeeze: 'Squeeze de derivados',
+  range_breakout: 'Ruptura de rango',
+};
+
+const fmtR = (v: number | null) => (v === null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)} R`);
+
 const STATUS_LABELS: Record<TradeOptionStatus, string> = {
   open: 'Abierta',
   tp_hit: 'TP alcanzado',
@@ -486,7 +503,7 @@ export const TradeOptionsView: React.FC<Props> = ({
               Operaciones Propuestas por Probabilidad y Confluencia
             </h3>
             <span className="text-xs text-slate-500 dark:text-slate-400">
-              Ordenadas por índice de confluencia técnica/derivados y probabilidad Monte Carlo GJR-GARCH (4,000 rutas).
+              Solo aparecen las estrategias cuyas condiciones se cumplen ahora. Ordenadas por calidad: setup + confluencia + historial medido de la estrategia.
             </span>
           </div>
 
@@ -514,7 +531,14 @@ export const TradeOptionsView: React.FC<Props> = ({
           </div>
         </div>
 
-        {filteredProposals.length === 0 ? (
+        {data.proposals.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900/60 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg p-6 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Sin operación recomendable ahora en {asset.toUpperCase()}
+            </div>
+            <div>Ninguna estrategia cumple sus condiciones. Esperar también es una decisión: forzar entradas sin señal solo añade costes.</div>
+          </div>
+        ) : filteredProposals.length === 0 ? (
           <div className="bg-white dark:bg-slate-900/60 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg p-6 text-center space-y-2 text-xs text-slate-500 dark:text-slate-400">
             <div>No hay sugerencias etiquetadas para este filtro de régimen en {asset.toUpperCase()}.</div>
             <button
@@ -569,10 +593,13 @@ export const TradeOptionsView: React.FC<Props> = ({
 
                     <div className="text-right font-mono tabular-nums shrink-0">
                       <div className="text-lg font-semibold text-sky-600 dark:text-sky-400">
-                        {p.probTpPct.toFixed(1)} % P(TP)
+                        Calidad {p.quality}/100
                       </div>
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Confluencia {p.confluenceScore}/100
+                      <span className={`inline-block mt-0.5 px-2 py-0.5 rounded text-[11px] font-sans font-medium ${VERDICT_UI[p.verdict]?.cls ?? ''}`}>
+                        {p.recommended ? '★ ' : ''}{VERDICT_UI[p.verdict]?.label ?? p.verdict}
+                      </span>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Confluencia {p.confluenceScore}/100 · tendencia diaria {p.htfTrend}
                       </div>
                     </div>
                   </div>
@@ -610,12 +637,12 @@ export const TradeOptionsView: React.FC<Props> = ({
                     </div>
 
                     <div>
-                      <div className="font-sans text-slate-500 dark:text-slate-400">R:R · EV · Kelly</div>
+                      <div className="font-sans text-slate-500 dark:text-slate-400">R:R · EV neutral · Riesgo</div>
                       <div className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
                         {p.rr.toFixed(2)} R · {p.evPct >= 0 ? '+' : ''}{p.evPct.toFixed(2)} %
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Kelly {p.kellyPct.toFixed(1)} % · TO {p.probTimeoutPct.toFixed(0)} %
+                        {p.kellyPct > 0 ? `¼ Kelly ${p.kellyPct.toFixed(1)} %` : 'Sin ventaja medida: riesgo mínimo'} · P(TP) sim. {p.probTpPct.toFixed(0)} %
                       </div>
                     </div>
                   </div>
@@ -625,6 +652,13 @@ export const TradeOptionsView: React.FC<Props> = ({
                     {p.rationale.map((line, rIdx) => (
                       <div key={rIdx}>• {line}</div>
                     ))}
+                    {p.track && (
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 font-mono tabular-nums">
+                        Historial {p.asset.toUpperCase()}: backtest {p.track.btN} ops
+                        {p.track.btWinPct !== null ? ` · TP1 ${p.track.btWinPct.toFixed(0)} %` : ''} · {fmtR(p.track.btExpR)}
+                        {' · '}reales {p.track.fwN} ops{p.track.fwN ? ` · ${fmtR(p.track.fwExpR)}` : ''}
+                      </div>
+                    )}
                     <div className="text-[11px] text-amber-700 dark:text-amber-400 pt-1">
                       Invalidación: {p.invalidation}
                     </div>
@@ -674,7 +708,7 @@ export const TradeOptionsView: React.FC<Props> = ({
                     onClick={() => setExpandedId(isExpanded ? null : p.id)}
                     className="text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 transition-colors cursor-pointer"
                   >
-                    {isExpanded ? 'Ocultar factores' : 'Ver desglose de factores (8)'}
+                    {isExpanded ? 'Ocultar factores' : `Ver desglose de factores (${p.factors.length})`}
                   </button>
 
                   <div className="flex items-center gap-2">
@@ -701,6 +735,66 @@ export const TradeOptionsView: React.FC<Props> = ({
         </div>
         )}
       </div>
+
+      {data && (data.skipped.length > 0 || data.strategyTracks.length > 0) && (
+        <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-5 space-y-4">
+          <div>
+            <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-slate-50">
+              Estrategias: historial medido y motivos de «no operar»
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Backtest = las mismas reglas repetidas sobre el histórico de {data.strategyTracks[0]?.btDays ?? 0} días (reglas no ajustadas con esos datos).
+              Reales = operaciones que la app ha registrado y ya cerradas. La esperanza se mide en R (resultado por unidad de riesgo, neto de costes).
+            </p>
+          </div>
+          {data.strategyTracks.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
+                    <th className="py-2 text-left font-medium">Estrategia</th>
+                    <th className="py-2 text-right font-medium">Backtest (n · TP1 · R)</th>
+                    <th className="py-2 text-right font-medium">Reales (n · R)</th>
+                    <th className="py-2 text-right font-medium">Combinado (n · R)</th>
+                    <th className="py-2 text-left font-medium pl-3">Veredicto</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70 font-mono tabular-nums">
+                  {data.strategyTracks.map((t) => (
+                    <tr key={t.strategyKey}>
+                      <td className="py-2 font-sans text-slate-800 dark:text-slate-200">
+                        {STRATEGY_TITLES[t.strategyKey] ?? t.strategyKey}
+                      </td>
+                      <td className="py-2 text-right">
+                        {t.strategyKey === 'derivatives_squeeze'
+                          ? 'no reproducible'
+                          : `${t.btN} · ${t.btWinPct !== null ? t.btWinPct.toFixed(0) + ' %' : '—'} · ${fmtR(t.btExpR)}`}
+                      </td>
+                      <td className="py-2 text-right">{t.fwN} · {fmtR(t.fwExpR)}</td>
+                      <td className="py-2 text-right">{t.n} · {fmtR(t.expR)}</td>
+                      <td className="py-2 pl-3">
+                        <span className={`px-2 py-0.5 rounded text-[11px] font-sans font-medium ${VERDICT_UI[t.verdict]?.cls ?? ''}`}>
+                          {VERDICT_UI[t.verdict]?.label ?? t.verdict}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {data.skipped.length > 0 && (
+            <div className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+              <div className="font-medium text-slate-700 dark:text-slate-200">Hoy sin señal en {asset.toUpperCase()}:</div>
+              {data.skipped.map((k) => (
+                <div key={k.strategyKey}>
+                  • <span className="font-medium">{k.label}</span>: {k.reason}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <OptionsEvaluationPanel evaluation={data?.stats.evaluation} />
 

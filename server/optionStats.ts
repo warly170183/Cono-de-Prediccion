@@ -10,6 +10,15 @@ const STRATEGY_LABELS: Record<string, string> = {
   range_breakout: 'Ruptura de rango',
 };
 
+const VERDICT_LABELS: Record<string, string> = {
+  validada: 'Ventaja validada',
+  prometedora: 'Prometedora',
+  dudosa: 'Dudosa',
+  descartada: 'Sin ventaja (descartada)',
+  sin_datos: 'Sin datos suficientes',
+  sin: 'Anteriores / manuales',
+};
+
 const mean = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : null);
 const pct = (num: number, den: number) => (den > 0 ? Number(((num / den) * 100).toFixed(1)) : null);
 const r2 = (v: number | null, d = 2) => (v === null ? null : Number(v.toFixed(d)));
@@ -52,7 +61,7 @@ function binomialP(k: number, n: number): number | null {
  * - 'asset': por activo (cualquier estrategia): conservador, porque las estrategias de un mismo
  *   activo se mueven juntas. Es la base del veredicto principal.
  */
-function independentSubset(rows: RegisteredTradeOption[], mode: 'strategy' | 'asset' = 'strategy'): RegisteredTradeOption[] {
+export function independentSubset(rows: RegisteredTradeOption[], mode: 'strategy' | 'asset' = 'strategy'): RegisteredTradeOption[] {
   const byKey = new Map<string, RegisteredTradeOption[]>();
   for (const r of rows) {
     const k = mode === 'asset' ? r.asset : `${r.asset}|${r.strategyKey}|${r.horizonHours}`;
@@ -280,6 +289,7 @@ export function buildEvaluation(rows: RegisteredTradeOption[], now = Date.now())
     byStrategy: groupBy(rows, (r) => r.strategyKey, (k) => STRATEGY_LABELS[k] ?? k),
     byDir: groupBy(rows, (r) => r.dir, (k) => (k === 'long' ? 'Largos' : 'Cortos')),
     byConfidence: groupBy(rows, (r) => r.confidence, (k) => `Confianza ${k}`),
+    byVerdict: groupBy(rows, (r) => r.verdict ?? 'sin', (k) => VERDICT_LABELS[k] ?? k),
     byAsset: groupBy(rows, (r) => r.asset, (k) => k.toUpperCase()),
     byRank: groupBy(rows, (r) => (r.rank === 1 ? 'top' : r.rank ? 'resto' : 'sin'), (k) =>
       k === 'top' ? 'Nº 1 del ranking' : k === 'resto' ? 'Resto del ranking' : 'Manuales / sin ranking',

@@ -222,6 +222,7 @@ export const OptionsEvaluationPanel: React.FC<Props> = ({ evaluation }) => {
             <Section title="Por posición en el ranking" rows={evaluation.byRank} />
             <Section title="Por confluencia (¿puntuar más alto acierta más?)" rows={evaluation.byConfluence} />
             <Section title="Por confianza" rows={evaluation.byConfidence} />
+            <Section title="Por veredicto de la estrategia" rows={evaluation.byVerdict} />
             <Section title="Por volatilidad del mercado al crearla" rows={evaluation.byRegime} />
             <Section title="Por régimen de mercado al crearla" rows={evaluation.byMarketRegime} />
             <Section title="Por activo" rows={evaluation.byAsset} />

@@ -17,6 +17,17 @@ Conos de volatilidad, derivados/GEX, opciones de trading y un sistema que evalú
 - Mac/Linux: `./iniciar.sh`
 - Manual: `npm install` y `npm run dev`, y abrir http://localhost:3000
 
+## Cómo se generan las Opciones de Trading
+
+- Cada estrategia **solo propone operación si se cumplen sus condiciones**; si no, la sección explica por qué no opera (esperar también es una decisión).
+  - *Continuación de tendencia*: tendencia horaria y diaria alineadas, retroceso hasta la zona de la EMA20 sin sobreextensión.
+  - *Reversión a la media*: extremo de Bollinger + RSI, sin tendencia fuerte, con vela de giro.
+  - *Ruptura de rango*: rango de 24 h comprimido, cierre fuera con volumen, sin perseguir.
+  - *Squeeze de derivados*: funding / L-S saturados con el precio ya girando.
+- No se opera contra la tendencia diaria sin un extremo claro. SL tras el último swing; TP1 nunca más allá del siguiente nivel (pivote, máx/mín 7 d, muros GEX); distancias medidas en rango diario.
+- **Historial medido:** las mismas reglas se repiten sobre el histórico (backtest, sin ajustar parámetros) y se combinan con las operaciones reales registradas. Veredicto por estrategia: *validada / prometedora / dudosa / descartada / sin datos*. Solo se marca ★ recomendada con ventaja validada (o prometedora con muestra amplia) y el riesgo sugerido (¼ Kelly) es 0 sin ventaja validada.
+- El sistema de evaluación mide además si las opciones «validadas» rinden mejor que el resto («Por veredicto de la estrategia»).
+
 ## Dónde se guardan tus datos
 
 Todo en la carpeta `data/` (no se sube a git y no se sobrescribe al actualizar el código):

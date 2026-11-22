@@ -474,6 +474,41 @@ export interface TradeOptionProposal {
   rationale: string[];
   invalidation: string;
   factors: ConfluenceFactor[];
+  /** Calidad global 0-100: setup + confluencia + historial de la estrategia. */
+  quality: number;
+  /** Veredicto sobre la ventaja medida de la estrategia (backtest + operaciones reales registradas). */
+  verdict: EdgeVerdict;
+  /** Resultado medido de la estrategia en este activo. */
+  track: StrategyTrack | null;
+  /** true = ventaja validada o prometedora y calidad suficiente. */
+  recommended: boolean;
+  htfTrend: 'alcista' | 'bajista' | 'lateral';
+}
+
+export type EdgeVerdict = 'validada' | 'prometedora' | 'dudosa' | 'descartada' | 'sin_datos';
+
+export interface StrategyTrack {
+  strategyKey: string;
+  /** Backtest histórico (replay de las mismas reglas). */
+  btN: number;
+  btWinPct: number | null;
+  btExpR: number | null;
+  btDays: number;
+  /** Operaciones reales registradas por la app (independientes y ya cerradas). */
+  fwN: number;
+  fwWinPct: number | null;
+  fwExpR: number | null;
+  /** Combinado. */
+  n: number;
+  expR: number | null;
+  seR: number | null;
+  verdict: EdgeVerdict;
+}
+
+export interface SkippedStrategy {
+  strategyKey: string;
+  label: string;
+  reason: string;
 }
 
 export type TradeOptionStatus = 'open' | 'tp_hit' | 'sl_hit' | 'expired' | 'closed_manual';
@@ -520,6 +555,8 @@ export interface RegisteredTradeOption {
   mirrorStatus?: 'tp_hit' | 'sl_hit' | 'expired' | null;
   /** true cuando ya se evaluó el horizonte completo. */
   horizonDone?: boolean;
+  quality?: number;
+  verdict?: string;
   /** Contexto de mercado congelado al crear la opción (para saber en qué condiciones funciona). */
   ctx?: {
     regime: string;
@@ -572,6 +609,7 @@ export interface TradeOptionEvaluation {
   byStrategy: TradeOptionGroupStats[];
   byDir: TradeOptionGroupStats[];
   byConfidence: TradeOptionGroupStats[];
+  byVerdict: TradeOptionGroupStats[];
   byAsset: TradeOptionGroupStats[];
   byRank: TradeOptionGroupStats[];
   byConfluence: TradeOptionGroupStats[];
@@ -622,6 +660,11 @@ export interface TradeOptionsResponse {
     biasModelB3d: number | null;
   };
   proposals: TradeOptionProposal[];
+  /** Estrategias que hoy NO proponen operación y por qué. */
+  skipped: SkippedStrategy[];
+  /** Historial medido de cada estrategia en este activo. */
+  strategyTracks: StrategyTrack[];
+  htf: { trend: 'alcista' | 'bajista' | 'lateral'; atrDPct: number | null };
   registered: RegisteredTradeOption[];
   stats: {
     total: number;

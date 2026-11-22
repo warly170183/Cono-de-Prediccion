@@ -6,7 +6,10 @@ import type {
   ConfluenceFactor,
   MarketBiasSnapshot,
   ProposalRegimeTag,
+  EdgeVerdict,
   RegisteredTradeOption,
+  SkippedStrategy,
+  StrategyTrack,
   TechnicalParametersSnapshot,
   TradeOptionProposal,
   TradeOptionsResponse,
@@ -30,7 +33,9 @@ import {
 } from './quantEngine.ts';
 
 import { JOURNAL_DIR, atomicWrite } from './paths.ts';
-import { buildEvaluation } from './optionStats.ts';
+import { buildEvaluation, independentSubset } from './optionStats.ts';
+import { backtestStrategies, edgeVerdict, type BacktestStat } from './optionBacktest.ts';
+import { detectSetups, htfFromDaily, type SetupSpec } from './tradeSignals.ts';
 import { readJsonl } from './storage.ts';
 const TRADE_OPTIONS_FILE = path.join(JOURNAL_DIR, 'trade_options.jsonl');
 const HOUR = 3_600_000;
@@ -216,7 +221,8 @@ export function computeTechnicalParameters(
   const high7d = Math.max(...highs.slice(-168));
   const low7d = Math.min(...lows.slice(-168));
 
-  const prevDay = candles1d.length >= 2 ? candles1d[candles1d.length - 2] : candles1d[0];
+  // Las velas diarias son solo CERRADAS (la del día en curso no está), así que la última es la de ayer.
+  const prevDay = candles1d[candles1d.length - 1];
   const pivotP = (prevDay[2] + prevDay[3] + prevDay[4]) / 3;
   const pivotR1 = 2 * pivotP - prevDay[3];
   const pivotS1 = 2 * pivotP - prevDay[2];
@@ -572,8 +578,78 @@ export function proposalToRegisteredRecord(
     mfePct: null,
     maePct: null,
     summary: p.rationale[0]?.slice(0, 200) ?? `${p.title} (${p.dir})`,
+    quality: p.quality,
+    verdict: p.verdict,
     ...(rank !== undefined ? { rank } : {}),
     ...(ctx ? { ctx } : {}),
+  };
+}
+
+const STRATEGY_NAMES: Record<TradeOptionProposal['strategyKey'], string> = {
+  trend_pullback: 'Continuación de tendencia',
+  mean_reversion: 'Reversión a la media',
+  derivatives_squeeze: 'Squeeze de derivados',
+  range_breakout: 'Ruptura de rango',
+};
+
+// Backtest por activo: se recalcula cada 3 h (o al forzar refresco) y no bloquea si falla la descarga.
+const btCache = new Map<string, { ts: number; stats: Record<string, BacktestStat> | null }>();
+async function getBacktest(asset: AssetId, refresh: boolean): Promise<Record<string, BacktestStat> | null> {
+  const c = btCache.get(asset);
+  if (c && Date.now() - c.ts < 3 * HOUR && (!refresh || c.stats)) return c.stats;
+  try {
+    const [h, d] = await Promise.all([fetchOkxCandles(asset, '1H', 4000, false), fetchOkxCandles(asset, '1D', 320, false)]);
+    const stats = backtestStrategies(h, d, computeTechnicalParameters);
+    btCache.set(asset, { ts: Date.now(), stats });
+    return stats;
+  } catch (e) {
+    console.warn(`Backtest de opciones no disponible (${asset}):`, e);
+    // reintento en ~30 min conservando el último resultado bueno
+    btCache.set(asset, { ts: Date.now() - 2.5 * HOUR, stats: c?.stats ?? null });
+    return c?.stats ?? null;
+  }
+}
+
+/** R medido de las operaciones reales (auto, motor nuevo, ya cerradas, sin solape). */
+function forwardSamples(rows: RegisteredTradeOption[], asset: AssetId, key: string) {
+  const fin = rows.filter(
+    (r) =>
+      r.asset === asset &&
+      r.strategyKey === key &&
+      r.source === 'auto' &&
+      r.quality !== undefined && // marca del motor actual: las anteriores no cuentan
+      (r.status === 'tp_hit' || r.status === 'sl_hit' || r.status === 'expired') &&
+      r.realizedPnlPct !== null &&
+      r.slPct > 0,
+  );
+  const ind = independentSubset(fin, 'strategy');
+  const rs = ind.map((r) => (r.realizedPnlPct as number) / r.slPct);
+  return { rs, wins: ind.filter((r) => r.status === 'tp_hit').length };
+}
+
+function buildTrack(
+  key: TradeOptionProposal['strategyKey'],
+  asset: AssetId,
+  bt: Record<string, BacktestStat> | null,
+  rows: RegisteredTradeOption[],
+): StrategyTrack {
+  const b = bt?.[key];
+  const fw = forwardSamples(rows, asset, key);
+  const ev = edgeVerdict([...(b?.rs ?? []), ...fw.rs]);
+  const fwMean = fw.rs.length ? fw.rs.reduce((s, v) => s + v, 0) / fw.rs.length : null;
+  return {
+    strategyKey: key,
+    btN: b?.n ?? 0,
+    btWinPct: b?.winPct ?? null,
+    btExpR: b?.expR ?? null,
+    btDays: b?.days ?? 0,
+    fwN: fw.rs.length,
+    fwWinPct: fw.rs.length ? Number(((fw.wins / fw.rs.length) * 100).toFixed(1)) : null,
+    fwExpR: fwMean === null ? null : Number(fwMean.toFixed(3)),
+    n: ev.n,
+    expR: ev.expR,
+    seR: ev.seR,
+    verdict: ev.verdict,
   };
 }
 
@@ -730,6 +806,8 @@ export async function computeTradeOptions(
     const anchorTs = block.last_ts;
     const bucketKey = String(Math.floor(anchorTs / (4 * HOUR)));
 
+    const htf = htfFromDaily(candles1d);
+
     // Build Confluence Factor Pool
     const buildFactorsForDir = (targetDir: 'long' | 'short'): ConfluenceFactor[] => {
       const f: ConfluenceFactor[] = [];
@@ -845,6 +923,15 @@ export async function computeTradeOptions(
         weight: 10,
       });
 
+      // 9. Tendencia del timeframe diario (EMA20/50 1D): no se opera contra ella a la ligera
+      f.push({
+        name: 'Tendencia diaria (EMA20/50 1D)',
+        category: 'técnico',
+        reading: `Tendencia diaria ${htf.trend}${htf.ema20 !== null ? ` · EMA20d $${htf.ema20.toLocaleString('en-US', { maximumFractionDigits: 0 })} / EMA50d $${(htf.ema50 as number).toLocaleString('en-US', { maximumFractionDigits: 0 })}` : ''}`,
+        signal: htf.trend === 'alcista' ? 'long' : htf.trend === 'bajista' ? 'short' : 'neutral',
+        weight: 14,
+      });
+
       return f;
     };
 
@@ -859,28 +946,27 @@ export async function computeTradeOptions(
       return Math.round(Math.min(95, Math.max(25, (alignedW / Math.max(1, totalW)) * 100)));
     };
 
-    const atrPct = Math.max(0.45, tech.atr14Pct);
+    const registeredNow = loadRegisteredTradeOptions();
+    const backtest = await getBacktest(asset, refresh);
+    const trackOf = (key: TradeOptionProposal['strategyKey']): StrategyTrack =>
+      buildTrack(key, asset, backtest, registeredNow);
 
-    // Helper to build a single evaluated TradeOptionProposal
-    const makeProposal = (spec: {
-      strategyKey: TradeOptionProposal['strategyKey'];
-      title: string;
-      dir: 'long' | 'short';
-      horizonHours: 24 | 72;
-      entryLow: number;
-      entryHigh: number;
-      slPct: number;
-      tp1Pct: number;
-      tp2Pct: number;
-      regimeTags: ProposalRegimeTag[];
-      rationale: string[];
-      invalidation: string;
-    }): TradeOptionProposal => {
+    // Cada estrategia solo propone operación si cumple SUS condiciones (ver tradeSignals.ts).
+    const { setups, skipped: skippedRaw } = detectSetups({
+      spot,
+      tech,
+      htf,
+      candles1h,
+      deriv: { fundZ: readings.fund_1d_z, lsZ: readings.ls_z, oiChg1d: readings.oi_chg_1d },
+      gex: gex ? { putWall: gex.put_wall, callWall: gex.call_wall, flip: gex.flip } : null,
+    });
+
+    const makeProposal = (spec: SetupSpec): TradeOptionProposal => {
       const isLong = spec.dir === 'long';
       const entryMid = roundPx((spec.entryLow + spec.entryHigh) / 2, spot);
-      const slPct = Number(Math.min(8.5, Math.max(0.8, spec.slPct)).toFixed(2));
-      const tp1Pct = Number(Math.min(18.0, Math.max(1.2, spec.tp1Pct)).toFixed(2));
-      const tp2Pct = Number(Math.max(tp1Pct * 1.45, spec.tp2Pct).toFixed(2));
+      const slPct = spec.slPct;
+      const tp1Pct = spec.tp1Pct;
+      const tp2Pct = spec.tp2Pct;
 
       const stopLoss = roundPx(spot * (1 + (isLong ? -slPct : slPct) / 100), spot);
       const takeProfit1 = roundPx(spot * (1 + (isLong ? tp1Pct : -tp1Pct) / 100), spot);
@@ -892,12 +978,30 @@ export async function computeTradeOptions(
       const edgeTilt = ((confluenceScore - 50) / 50) * EDGE_TILT_MAX_PCT_24H * (isLong ? 1 : -1);
       const sim = evaluateOnPaths(cumPaths, spec.horizonHours, spec.dir, slPct, tp1Pct, edgeTilt);
 
+      const track = trackOf(spec.strategyKey);
+      const verdictAdj: Record<EdgeVerdict, number> = {
+        validada: 10,
+        prometedora: 4,
+        sin_datos: 0,
+        dudosa: -6,
+        descartada: -16,
+      };
+      const quality = Math.round(
+        Math.min(98, Math.max(20, 0.5 * spec.techScore + 0.5 * confluenceScore + verdictAdj[track.verdict])),
+      );
+      // "Recomendada" exige evidencia: ventaja validada, o prometedora con muestra amplia. Con pocos datos no se recomienda.
+      const validated = track.verdict === 'validada';
+      const recommended =
+        (validated && quality >= 60) || (track.verdict === 'prometedora' && track.n >= 40 && quality >= 65);
       const confidence: TradeOptionProposal['confidence'] =
-        confluenceScore >= 68 && sim.probTpPct >= 44
-          ? 'Alta'
-          : confluenceScore >= 54 && sim.probTpPct >= 34
-            ? 'Media'
-            : 'Moderada';
+        recommended && quality >= 72 ? 'Alta' : recommended || quality >= 60 ? 'Media' : 'Moderada';
+
+      // Tamaño: cuarto de Kelly sobre la esperanza MEDIDA (no la simulada), solo con ventaja validada; si no, riesgo mínimo.
+      let kellyPct = 0;
+      if (validated && track.expR !== null && track.seR !== null && track.n > 1) {
+        const variance = (track.seR * Math.sqrt(track.n)) ** 2;
+        if (variance > 0 && track.expR > 0) kellyPct = Math.min(KELLY_CAP_PCT, 25 * (track.expR / variance));
+      }
 
       return {
         id: `${asset}_${spec.strategyKey}_${bucketKey}`,
@@ -922,150 +1026,30 @@ export async function computeTradeOptions(
         probTimeoutPct: sim.probTimeoutPct,
         evPct: sim.evPct,
         evR: sim.evR,
-        kellyPct: sim.kellyPct,
+        kellyPct: Number(kellyPct.toFixed(1)),
         confluenceScore,
         confidence,
         regimeTags: spec.regimeTags,
         rationale: spec.rationale,
         invalidation: spec.invalidation,
         factors,
+        quality,
+        verdict: track.verdict,
+        track,
+        recommended,
+        htfTrend: htf.trend,
       };
     };
 
-    // 1. Trend Pullback / Continuation Setup
-    const trendDir: 'long' | 'short' =
-      tech.trendBias === 'bajista' || (tech.ema20 < tech.ema50 && tech.macdHist < 0) ? 'short' : 'long';
-    const trendSlPct = Math.max(1.2, atrPct * 1.9);
-    const trendTp1Pct = Math.max(2.2, atrPct * 3.4);
-    const trendProp = makeProposal({
-      strategyKey: 'trend_pullback',
-      title:
-        trendDir === 'long'
-          ? 'Continuación Alcista sobre EMA20 / VWAP'
-          : 'Continuación Bajista bajo EMA20 / VWAP',
-      dir: trendDir,
-      horizonHours: 72,
-      entryLow: trendDir === 'long' ? Math.min(spot, tech.ema20) * 0.997 : spot * 0.998,
-      entryHigh: trendDir === 'long' ? spot * 1.002 : Math.max(spot, tech.ema20) * 1.003,
-      slPct: trendSlPct,
-      tp1Pct: trendTp1Pct,
-      tp2Pct: trendTp1Pct * 1.6,
-      regimeTags:
-        marketBias.netGexDiffM !== null && marketBias.netGexDiffM < -5
-          ? ['trend', 'gamma_flip']
-          : ['trend'],
-      rationale: [
-        `Sesgo técnico ${tech.trendBias} con ADX(14) en ${tech.adx14.toFixed(1)} (+DI ${tech.plusDi14.toFixed(1)} / -DI ${tech.minusDi14.toFixed(1)}).`,
-        `Spot frente a EMA20 ($${tech.ema20.toLocaleString('en-US')}) y EMA50 ($${tech.ema50.toLocaleString('en-US')}); MACD hist ${tech.macdHist >= 0 ? '+' : ''}${tech.macdHist}.`,
-        `Horizonte de 72h alineado con ATR(14) de ${atrPct.toFixed(2)} % (${trendDir === 'long' ? 'objetivo hacia cuantil 75 GARCH' : 'objetivo hacia cuantil 25 GARCH'}).`,
-      ],
-      invalidation:
-        trendDir === 'long'
-          ? `Cierre horario bajo EMA50 ($${tech.ema50.toLocaleString('en-US')}) o pérdida de $${roundPx(spot * (1 - trendSlPct / 100), spot).toLocaleString('en-US')}.`
-          : `Recuperación sobre EMA50 ($${tech.ema50.toLocaleString('en-US')}) o ruptura sobre $${roundPx(spot * (1 + trendSlPct / 100), spot).toLocaleString('en-US')}.`,
-    });
-
-    // 2. Mean Reversion Setup (RSI + Bollinger + GEX Walls / 24h Range)
-    const mrDir: 'long' | 'short' =
-      tech.bbZ < -0.35 || tech.rsi14 < 48 || (gex?.put_wall && Math.abs(spot / gex.put_wall - 1) < 0.025)
-        ? 'long'
-        : 'short';
-    const mrSlPct = Math.max(1.0, atrPct * 1.6);
-    const mrTp1Pct = Math.max(1.8, Math.min(4.2, Math.abs(tech.vwapDistPct) + atrPct * 2.1));
-    const mrProp = makeProposal({
-      strategyKey: 'mean_reversion',
-      title:
-        mrDir === 'long'
-          ? 'Reversión a la Media hacia VWAP / BB Media (Largo)'
-          : 'Reversión a la Media hacia VWAP / BB Media (Corto)',
-      dir: mrDir,
-      horizonHours: 24,
-      entryLow: mrDir === 'long' ? Math.max(tech.low24h, spot * 0.994) : spot * 0.999,
-      entryHigh: mrDir === 'long' ? spot * 1.001 : Math.min(tech.high24h, spot * 1.006),
-      slPct: mrSlPct,
-      tp1Pct: mrTp1Pct,
-      tp2Pct: mrTp1Pct * 1.5,
-      regimeTags: ['gamma_flip'],
-      rationale: [
-        `RSI(14) en ${tech.rsi14.toFixed(1)}, Estocástico %K ${tech.stochK.toFixed(1)} y Bollinger Z en ${tech.bbZ >= 0 ? '+' : ''}${tech.bbZ.toFixed(2)}.`,
-        gex
-          ? `Gamma neta Deribit ${gex.net_gex_m >= 0 ? 'positiva' : 'negativa'} ($${gex.net_gex_m.toFixed(1)}M); Put Wall $${gex.put_wall?.toLocaleString('en-US') ?? '—'} / Call Wall $${gex.call_wall?.toLocaleString('en-US') ?? '—'}.`
-          : `Rango 24h entre $${tech.low24h.toLocaleString('en-US')} y $${tech.high24h.toLocaleString('en-US')} con VWAP en $${tech.vwap24h.toLocaleString('en-US')}.`,
-        `Cono GARCH 24h proyecta dispersión ±${(((block.cone['90'][24] / spot) - 1) * 100).toFixed(1)} % en banda del 90 %.`,
-      ],
-      invalidation:
-        mrDir === 'long'
-          ? `Pérdida del mínimo 24h ($${tech.low24h.toLocaleString('en-US')}) con expansión de volumen.`
-          : `Ruptura limpia sobre el máximo 24h ($${tech.high24h.toLocaleString('en-US')}) con RVOL > 1.3x.`,
-    });
-
-    // 3. Derivatives Positioning / Squeeze Setup
-    const derivDir: 'long' | 'short' =
-      (readings.fund_1d_z !== null && readings.fund_1d_z > 0.8) ||
-      (readings.ls_z !== null && readings.ls_z > 1.0)
-        ? 'short'
-        : 'long';
-    const derivSlPct = Math.max(1.5, atrPct * 2.1);
-    const derivTp1Pct = Math.max(2.6, atrPct * 3.8);
-    const derivProp = makeProposal({
-      strategyKey: 'derivatives_squeeze',
-      title:
-        derivDir === 'long'
-          ? 'Asimetría de Derivados / Short-Squeeze Potencial'
-          : 'Asimetría de Derivados / Descompresión Larga',
-      dir: derivDir,
-      horizonHours: 72,
-      entryLow: spot * 0.996,
-      entryHigh: spot * 1.004,
-      slPct: derivSlPct,
-      tp1Pct: derivTp1Pct,
-      tp2Pct: derivTp1Pct * 1.55,
-      regimeTags:
-        marketBias.inGammaFlipZone || tech.adx14 >= 18
-          ? ['gamma_flip', 'trend']
-          : ['gamma_flip'],
-      rationale: [
-        `Funding 1d z-score ${readings.fund_1d_z !== null ? readings.fund_1d_z.toFixed(2) : 'N/D'}, OI 1d ${readings.oi_chg_1d !== null ? `${readings.oi_chg_1d >= 0 ? '+' : ''}${readings.oi_chg_1d.toFixed(1)}%` : 'N/D'} y L/S z ${readings.ls_z !== null ? readings.ls_z.toFixed(2) : 'N/D'}.`,
-        `Diferencial IV-RV en ${readings.iv_rv !== null ? `${readings.iv_rv >= 0 ? '+' : ''}${readings.iv_rv.toFixed(1)} pts` : 'N/D'}; DVOL ${readings.dvol !== null ? `${readings.dvol.toFixed(1)}%` : 'N/D'}.`,
-        `Modelo logístico B estima P(subida 72h) = ${bias.p_up.B3 !== null ? `${bias.p_up.B3.toFixed(1)}%` : `${((block.p_close_up['up_72'] ?? 0.5) * 100).toFixed(1)}%`}.`,
-      ],
-      invalidation: `Cambio adverso de flujo OBV (${tech.obvTrend}) o ruptura de Pivot ${derivDir === 'long' ? `S1 ($${tech.pivotS1.toLocaleString('en-US')})` : `R1 ($${tech.pivotR1.toLocaleString('en-US')})`}.`,
-    });
-
-    // 4. Volatility Breakout / Range Pivot Setup
-    const brkDir: 'long' | 'short' =
-      spot >= tech.pivotP && tech.obvTrend !== 'bajista' ? 'long' : 'short';
-    const brkSlPct = Math.max(1.1, atrPct * 1.7);
-    const brkTp1Pct = Math.max(2.0, atrPct * 3.0);
-    const brkProp = makeProposal({
-      strategyKey: 'range_breakout',
-      title:
-        brkDir === 'long'
-          ? 'Ruptura de Pivote Diario hacia R1 / Banda Superior'
-          : 'Quiebre de Pivote Diario hacia S1 / Banda Inferior',
-      dir: brkDir,
-      horizonHours: 24,
-      entryLow: brkDir === 'long' ? Math.min(spot, tech.pivotP) : spot * 0.998,
-      entryHigh: brkDir === 'long' ? spot * 1.003 : Math.max(spot, tech.pivotP),
-      slPct: brkSlPct,
-      tp1Pct: brkTp1Pct,
-      tp2Pct: brkTp1Pct * 1.5,
-      regimeTags: ['trend', 'gamma_flip'],
-      rationale: [
-        `Ancho Bollinger ${tech.bbWidthPct.toFixed(2)} % y RVOL 24h de ${tech.rvol24h.toFixed(2)}x respecto a la media de 7 días.`,
-        `Nivel Pivote P en $${tech.pivotP.toLocaleString('en-US')} (S1 $${tech.pivotS1.toLocaleString('en-US')} / R1 $${tech.pivotR1.toLocaleString('en-US')}).`,
-        `Régimen GMM actual: ${regime.current} (${(regime.probs[regime.current] * 100).toFixed(0)} % probabilidad).`,
-      ],
-      invalidation:
-        brkDir === 'long'
-          ? `Fallo y cierre por debajo del Pivote P ($${tech.pivotP.toLocaleString('en-US')}).`
-          : `Reclamación horaria por encima del Pivote P ($${tech.pivotP.toLocaleString('en-US')}).`,
-    });
-
-    const proposals = [trendProp, mrProp, derivProp, brkProp].sort(
-      (a, b) =>
-        b.confluenceScore * 0.6 + b.probTpPct * 0.4 - (a.confluenceScore * 0.6 + a.probTpPct * 0.4),
-    );
+    const proposals = setups
+      .map(makeProposal)
+      .sort((a, b) => Number(b.recommended) - Number(a.recommended) || b.quality - a.quality);
+    const skipped: SkippedStrategy[] = skippedRaw.map((x) => ({
+      strategyKey: x.strategyKey,
+      label: STRATEGY_NAMES[x.strategyKey],
+      reason: x.reason,
+    }));
+    const strategyTracks = (Object.keys(STRATEGY_NAMES) as TradeOptionProposal['strategyKey'][]).map(trackOf);
 
     // Guarda TODAS las opciones generadas (las 4 estrategias) una vez por activo, estrategia y tanda de 4 h,
     // para poder evaluarlas después contra la evolución real del precio.
@@ -1119,6 +1103,9 @@ export async function computeTradeOptions(
         biasModelB3d: bias.p_up.B3,
       },
       proposals,
+      skipped,
+      strategyTracks,
+      htf: { trend: htf.trend, atrDPct: htf.atrDPct === null ? null : Number(htf.atrDPct.toFixed(2)) },
       registered,
       stats: summarizeTradeOptionStats(registered),
     };
