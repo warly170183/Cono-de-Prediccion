@@ -755,6 +755,7 @@ export function computeGex(
     sg: number;
     fr: number;
     exp: number;
+    label: string;
   }
 
   const parsed: ParsedOption[] = [];
@@ -777,6 +778,7 @@ export function computeGex(
       sg: cp === 'C' ? 1 : -1,
       fr: o.underlying_price / spot,
       exp,
+      label: `${dStr}${monStr}${yyStr}`,
     });
   }
 
@@ -811,12 +813,17 @@ export function computeGex(
       profile.push({ spot: Number(s.toFixed(1)), gex_m: Number((g / 1e6).toFixed(2)) });
     }
   }
+  // Gamma Flip: de todos los cruces por cero del perfil, el más cercano al spot (el primero desde abajo podía estar a un -20 %).
+  let flipDist = Infinity;
   for (let i = 0; i < gridVals.length - 1; i++) {
     if (gridVals[i].g * gridVals[i + 1].g < 0) {
       const { s: s0, g: g0 } = gridVals[i];
       const { s: s1, g: g1 } = gridVals[i + 1];
-      flip = Number((s0 - (g0 * (s1 - s0)) / (g1 - g0)).toFixed(2));
-      break;
+      const cross = s0 - (g0 * (s1 - s0)) / (g1 - g0);
+      if (Math.abs(cross - spot) < flipDist) {
+        flipDist = Math.abs(cross - spot);
+        flip = Number(cross.toFixed(2));
+      }
     }
   }
 
@@ -930,6 +937,75 @@ export function computeGex(
       };
     });
 
+  // ── Max pain, IV ATM por vencimiento y skew 25Δ ──
+  const byExp = new Map<number, ParsedOption[]>();
+  for (const o of parsed) (byExp.get(o.exp) ?? byExp.set(o.exp, []).get(o.exp)!).push(o);
+  const expiries = Array.from(byExp.keys()).sort((a, b) => a - b);
+
+  const max_pain = expiries.slice(0, 4).map((exp) => {
+    const opts = byExp.get(exp)!;
+    const strikes = Array.from(new Set(opts.map((o) => o.K))).sort((a, b) => a - b);
+    let best = strikes[0];
+    let bestPain = Infinity;
+    for (const k of strikes) {
+      let pain = 0;
+      for (const o of opts) pain += o.oi * (o.sg > 0 ? Math.max(0, k - o.K) : Math.max(0, o.K - k));
+      if (pain < bestPain) {
+        bestPain = pain;
+        best = k;
+      }
+    }
+    return {
+      expiry: opts[0].label,
+      days: Number(((exp - nowSec) / 86400).toFixed(1)),
+      strike: best,
+      oi: Number(opts.reduce((a, o) => a + o.oi, 0).toFixed(0)),
+    };
+  });
+
+  const atmIvOf = (opts: ParsedOption[]) => {
+    const near = opts.reduce((b, o) => (Math.abs(Math.log(o.K / spot)) < Math.abs(Math.log(b.K / spot)) ? o : b), opts[0]);
+    const same = opts.filter((o) => o.K === near.K);
+    return mean(same.map((o) => o.iv)) * 100;
+  };
+  const atm_term = expiries.slice(0, 8).map((exp) => ({
+    expiry: byExp.get(exp)![0].label,
+    days: Number(((exp - nowSec) / 86400).toFixed(1)),
+    iv: Number(atmIvOf(byExp.get(exp)!).toFixed(2)),
+  }));
+
+  let skew25: GexOutput['skew25'] = null;
+  {
+    const cands = expiries
+      .map((exp) => ({ exp, days: (exp - nowSec) / 86400 }))
+      .filter((e) => e.days >= 7 && e.days <= 60)
+      .sort((a, b) => Math.abs(a.days - 30) - Math.abs(b.days - 30));
+    if (cands.length) {
+      const { exp, days } = cands[0];
+      const opts = byExp.get(exp)!;
+      const withDelta = opts.map((o) => {
+        const F = o.fr * spot;
+        const d1 = (Math.log(F / o.K) + 0.5 * o.iv * o.iv * o.T) / (o.iv * Math.sqrt(o.T));
+        const callDelta = normCdf(d1);
+        return { o, delta: o.sg > 0 ? callDelta : callDelta - 1 };
+      });
+      const calls = withDelta.filter((x) => x.o.sg > 0).sort((a, b) => Math.abs(a.delta - 0.25) - Math.abs(b.delta - 0.25));
+      const puts = withDelta.filter((x) => x.o.sg < 0).sort((a, b) => Math.abs(a.delta + 0.25) - Math.abs(b.delta + 0.25));
+      if (calls.length && puts.length && Math.abs(calls[0].delta - 0.25) <= 0.1 && Math.abs(puts[0].delta + 0.25) <= 0.1) {
+        const atm = atmIvOf(opts);
+        const cIv = calls[0].o.iv * 100;
+        const pIv = puts[0].o.iv * 100;
+        skew25 = {
+          expiry: opts[0].label,
+          days: Number(days.toFixed(1)),
+          rr25: Number((cIv - pIv).toFixed(2)),
+          bf25: Number(((cIv + pIv) / 2 - atm).toFixed(2)),
+          atm_iv: Number(atm.toFixed(2)),
+        };
+      }
+    }
+  }
+
   return {
     asset: asset.toUpperCase(),
     spot,
@@ -949,6 +1025,9 @@ export function computeGex(
     profile,
     term_buckets,
     iv_smile,
+    max_pain,
+    atm_term,
+    skew25,
   };
 }
 

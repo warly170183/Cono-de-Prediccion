@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { OptionsPositioningPanel } from './OptionsPositioningPanel.tsx';
 import type { AssetId, BiasAnalysisOutput, DerivativesReadings, GexOutput } from '../types.ts';
 
 interface Props {
@@ -532,6 +533,8 @@ export const GexDerivativesView: React.FC<Props> = ({ asset, readings, gex, onSe
           </div>
         </div>
       )}
+
+      {gex && <OptionsPositioningPanel gex={gex} />}
 
       {/* bias.py Parity Section: Models A/B + 8 Daily Funding/OI Rules */}
       <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-5 space-y-5">

@@ -101,6 +101,12 @@ export interface GexOutput {
   profile: Array<{ spot: number; gex_m: number }>;
   term_buckets: GexTermBucket[];
   iv_smile: IvSmilePoint[];
+  /** Strike de máximo dolor por vencimiento (4 más cercanos). */
+  max_pain: Array<{ expiry: string; days: number; strike: number; oi: number }>;
+  /** IV ATM por vencimiento (estructura temporal). */
+  atm_term: Array<{ expiry: string; days: number; iv: number }>;
+  /** Risk reversal / butterfly 25Δ del vencimiento más cercano a 30 días. */
+  skew25: { expiry: string; days: number; rr25: number; bf25: number; atm_iv: number } | null;
 }
 
 export interface WalkForwardHorizon {
