@@ -29,7 +29,7 @@ import {
   simulateGarchPaths,
 } from './quantEngine.ts';
 
-const JOURNAL_DIR = path.resolve(process.cwd(), 'journal');
+import { JOURNAL_DIR } from './paths.ts';
 const TRADE_OPTIONS_FILE = path.join(JOURNAL_DIR, 'trade_options.jsonl');
 const HOUR = 3_600_000;
 // Tope conservador: el edge direccional no está validado (AUC ≈ 0,51 en /api/results).
@@ -352,6 +352,39 @@ export function upsertRegisteredTradeOption(row: RegisteredTradeOption): Registe
   byId.set(row.id, row);
   writeRegisteredTradeOptions(Array.from(byId.values()));
   return row;
+}
+
+/**
+ * Rehidrata desde la copia en Firestore las operaciones que faltan en disco.
+ * Una operación abierta local se actualiza si la copia en la nube ya está cerrada.
+ */
+export function restoreRegisteredTradeOptions(rows: unknown[]): number {
+  const existing = loadRegisteredTradeOptions();
+  const byId = new Map<string, RegisteredTradeOption>();
+  for (const r of existing) byId.set(r.id, r);
+  let changed = 0;
+  for (const raw of rows) {
+    const x = raw as Partial<RegisteredTradeOption> | null;
+    const ok =
+      !!x &&
+      typeof x.id === 'string' &&
+      /^[a-zA-Z0-9_-]{1,128}$/.test(x.id) &&
+      (x.asset === 'btc' || x.asset === 'eth' || x.asset === 'sol') &&
+      (x.dir === 'long' || x.dir === 'short') &&
+      typeof x.entryPrice === 'number' &&
+      x.entryPrice > 0 &&
+      typeof x.createdTs === 'number' &&
+      typeof x.status === 'string';
+    if (!ok) continue;
+    const row = x as RegisteredTradeOption;
+    const local = byId.get(row.id);
+    if (!local || (local.status === 'open' && row.status !== 'open')) {
+      byId.set(row.id, row);
+      changed++;
+    }
+  }
+  if (changed) writeRegisteredTradeOptions(Array.from(byId.values()));
+  return changed;
 }
 
 export function deleteRegisteredTradeOptionById(id: string): boolean {
@@ -1018,7 +1051,7 @@ export async function computeTradeOptions(
       rationale: [
         `Ancho Bollinger ${tech.bbWidthPct.toFixed(2)} % y RVOL 24h de ${tech.rvol24h.toFixed(2)}x respecto a la media de 7 días.`,
         `Nivel Pivote P en $${tech.pivotP.toLocaleString('en-US')} (S1 $${tech.pivotS1.toLocaleString('en-US')} / R1 $${tech.pivotR1.toLocaleString('en-US')}).`,
-        `Régimen HMM actual: ${regime.current} (${(regime.probs[regime.current] * 100).toFixed(0)} % probabilidad).`,
+        `Régimen GMM actual: ${regime.current} (${(regime.probs[regime.current] * 100).toFixed(0)} % probabilidad).`,
       ],
       invalidation:
         brkDir === 'long'

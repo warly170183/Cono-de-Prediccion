@@ -237,7 +237,7 @@ export const TradeOptionsView: React.FC<Props> = ({
             Parámetros Técnicos y Niveles Estructurales ({asset.toUpperCase()})
           </h3>
           <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
-            Régimen HMM: {data.regime.current} ({(data.regime.probs[data.regime.current] * 100).toFixed(0)} %)
+            Régimen GMM: {data.regime.current} ({(data.regime.probs[data.regime.current] * 100).toFixed(0)} %)
             {m.netGexM !== null ? ` · Net GEX $${m.netGexM.toFixed(1)}M` : ''}
             {m.gammaFlip !== null ? ` · Flip ${fmtPx(m.gammaFlip, data.spot)}` : ''}
           </span>

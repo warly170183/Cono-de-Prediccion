@@ -88,7 +88,7 @@ export const ConeView: React.FC<Props> = ({ data }) => {
         </div>
 
         <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-500 dark:text-slate-400">Régimen de Volatilidad (HMM/EM)</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">Régimen de Volatilidad (GMM/EM)</div>
           <div className={`mt-1.5 text-2xl font-display font-semibold ${regimeColor}`}>
             {data.regime.current}
           </div>

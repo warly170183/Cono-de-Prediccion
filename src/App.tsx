@@ -327,6 +327,49 @@ export default function App() {
     };
   }, [authReady, user, cloudPredsReady, cloudPreds, journal]);
 
+  // Rehidrata el disco del servidor desde Firestore (p. ej. tras un redeploy con disco efímero):
+  // envía solo lo que existe en la nube y falta en el servidor. El servidor nunca sobrescribe.
+  const restoredForUidRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!authReady || !user || !cloudPredsReady || !cloudOptionsReady) return;
+    if (!journal.length || !tradeOptions) return;
+    if (restoredForUidRef.current === user.uid) return;
+
+    const serverIds = new Set<string>();
+    for (const item of journal) for (const p of item.predictions) serverIds.add(`${item.asset}:${p.id}`);
+    const missingPreds: Record<string, PredictionRecord[]> = { btc: [], eth: [], sol: [] };
+    for (const c of cloudPreds) {
+      if (!serverIds.has(`${c.asset}:${c.record.id}`)) missingPreds[c.asset].push(c.record);
+    }
+    const serverOpts = new Map((tradeOptions.registered ?? []).map((o) => [o.id, o.status]));
+    const missingOpts = cloudTradeOptions.filter((o) => {
+      const st = serverOpts.get(o.id);
+      return st === undefined || (st === 'open' && o.status !== 'open');
+    });
+
+    restoredForUidRef.current = user.uid;
+    const total = Object.values(missingPreds).reduce((n, l) => n + l.length, 0) + missingOpts.length;
+    if (total === 0) return;
+    void (async () => {
+      try {
+        const res = await fetch('/api/journal/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ predictions: missingPreds, tradeOptions: missingOpts }),
+        });
+        if (res.ok) {
+          await fetchJournalAndResults({ silent: true });
+          await fetchTradeOptions(asset);
+        } else {
+          restoredForUidRef.current = null;
+        }
+      } catch (err) {
+        restoredForUidRef.current = null;
+        console.warn('Restauración desde Firestore fallida:', err);
+      }
+    })();
+  }, [authReady, user, cloudPredsReady, cloudOptionsReady, cloudPreds, cloudTradeOptions, journal, tradeOptions, asset, fetchJournalAndResults, fetchTradeOptions]);
+
   // Automatic Firestore backup for registered Trade Options (respecting terminal state lock)
   useEffect(() => {
     if (!authReady || !user || !cloudOptionsReady || !tradeOptions?.registered?.length) return;

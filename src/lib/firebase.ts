@@ -239,7 +239,7 @@ export function subscribeCloudPredictions(
             vol_ann_pct: Number(v.volAnnPct),
             vol_pctile: Number(v.volPctile),
             regime_vol: String(v.regimeVol),
-            hmm: { state: null, p: null },
+            gmm: { state: null, p: null },
             readings: {},
             gex: {},
             flags: (v.flags as { fund: string; oi_flush: boolean | null }) ?? {

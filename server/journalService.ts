@@ -18,7 +18,7 @@ import {
   computeOptionsCone,
 } from './quantEngine.ts';
 
-const JOURNAL_DIR = path.resolve(process.cwd(), 'journal');
+import { JOURNAL_DIR } from './paths.ts';
 const HOUR = 3_600_000;
 const HZ = [24, 72] as const;
 const QS = ['5', '10', '25', '50', '75', '90', '95'] as const;
@@ -34,7 +34,49 @@ export function loadJournalPredictions(asset: AssetId): JournalRecord[] {
   return raw
     .split('\n')
     .filter((l) => l.trim().length > 0)
-    .map((l) => ({ asset, ...(JSON.parse(l) as JournalRecord) }));
+    .map((l) => normalizeRecord(asset, JSON.parse(l) as JournalRecord));
+}
+
+/** Compatibilidad: los registros antiguos guardaban el régimen en `hmm`; ahora es `gmm`. */
+function normalizeRecord(asset: AssetId, raw: JournalRecord): JournalRecord {
+  const r = { asset, ...raw } as JournalRecord & { hmm?: JournalRecord['gmm'] };
+  if (r.hmm && !r.gmm) r.gmm = r.hmm;
+  delete r.hmm;
+  return r;
+}
+
+function isValidRecord(r: unknown): r is JournalRecord {
+  const x = r as Partial<JournalRecord> | null;
+  return (
+    !!x &&
+    typeof x.id === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(x.id) &&
+    typeof x.anchor_ts === 'number' &&
+    x.anchor_ts > 0 &&
+    typeof x.spot === 'number' &&
+    x.spot > 0 &&
+    typeof x.cone === 'object' &&
+    x.cone !== null
+  );
+}
+
+/** Añade solo los registros que faltan en disco (nunca sobrescribe). Devuelve cuántos añadió. */
+export function restoreJournalPredictions(asset: AssetId, records: unknown[]): number {
+  const existing = loadJournalPredictions(asset);
+  const have = new Set(existing.map((r) => r.id));
+  const added: JournalRecord[] = [];
+  for (const raw of records) {
+    if (!isValidRecord(raw) || have.has(raw.id)) continue;
+    have.add(raw.id);
+    added.push(normalizeRecord(asset, raw));
+  }
+  if (!added.length) return 0;
+  fs.mkdirSync(JOURNAL_DIR, { recursive: true });
+  const byId = new Map<string, JournalRecord>();
+  for (const r of [...existing, ...added]) byId.set(r.id, r);
+  const lines = Array.from(byId.keys()).sort().map((k) => JSON.stringify(byId.get(k)));
+  fs.writeFileSync(predPath(asset), lines.join('\n') + '\n', 'utf-8');
+  return added.length;
 }
 
 export function saveJournalPrediction(asset: AssetId, record: JournalRecord) {
@@ -98,7 +140,7 @@ export function scorePredictions(
         in90_opt: qo ? (y >= qo['5'] && y <= qo['95'] ? 1 : 0) : null,
         fund: r.flags.fund,
         oi_flush: r.flags.oi_flush,
-        hmm: r.hmm?.state ?? null,
+        gmm: r.gmm?.state ?? null,
       });
     }
   }
@@ -218,7 +260,7 @@ export async function runLivePredictionSnapshot(asset: AssetId, forceRefresh = t
     vol_ann_pct: Number((block.vol_now_ann * 100).toFixed(1)),
     vol_pctile: Number(block.vol_pctile.toFixed(1)),
     regime_vol: regimeInfo.current,
-    hmm:
+    gmm:
       asset === 'btc'
         ? { state: regimeInfo.current, p: Number(regimeInfo.probs[regimeInfo.current].toFixed(3)) }
         : { state: null, p: null },
@@ -283,12 +325,12 @@ export async function exportJournalData(
   const scored = scorePredictions(asset, preds, candles1h);
 
   if (type === 'scores') {
-    const headers = ['asset', 'id', 'h', 'spot', 'close', 'ret_pct', 'in50', 'in90', 'pit', 'in90_ens', 'in90_opt', 'fund', 'oi_flush', 'hmm'];
+    const headers = ['asset', 'id', 'h', 'spot', 'close', 'ret_pct', 'in50', 'in90', 'pit', 'in90_ens', 'in90_opt', 'fund', 'oi_flush', 'gmm'];
     const lines = scored.map((r) =>
       [
         r.asset, r.id, r.h, r.spot, r.close, r.ret_pct, r.in50, r.in90, r.pit,
         r.in90_ens === null ? '' : r.in90_ens, r.in90_opt === null ? '' : r.in90_opt,
-        r.fund, r.oi_flush === null ? '' : r.oi_flush, r.hmm ?? '',
+        r.fund, r.oi_flush === null ? '' : r.oi_flush, r.gmm ?? '',
       ].join(','),
     );
     return {

@@ -150,7 +150,7 @@ const NODES: ArchNode[] = [
     w: 236,
     h: 112,
     title: 'Motor Cuantitativo GARCH & GEX',
-    subtitle: 'GJR-GARCH, SVI, HMM, EV/Kelly',
+    subtitle: 'GJR-GARCH, SVI, GMM, EV/Kelly',
     accent: 'emerald',
     summary:
       'Núcleo matemático en TypeScript puro: ajusta GJR-GARCH(1,1) Student-t, simula conos de densidad Monte Carlo, ajusta superficie SVI libre de arbitraje y calcula perfil Gamma Flip.',
@@ -471,7 +471,7 @@ const PIPELINE_ROWS: PipelineBenchmarkRow[] = [
     mcPaths: 3000,
     horizonLabel: '72 h / 30 d',
     mathNotes:
-      'Estima GJR-GARCH(1,1) Student-t, mezcla con relación HAR-RV (ensamble), clasifica régimen HMM (Calma/Normal/Turbulento) y acopla densidad SVI libre de arbitraje cuando hay cadena Deribit.',
+      'Estima GJR-GARCH(1,1) Student-t, mezcla con relación HAR-RV (ensamble), clasifica régimen GMM — mezcla gaussiana de 3 componentes (Calma/Normal/Turbulento) y acopla densidad SVI libre de arbitraje cuando hay cadena Deribit.',
     targetTab: 'cone',
   },
   {

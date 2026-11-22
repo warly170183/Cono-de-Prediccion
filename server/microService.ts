@@ -3,9 +3,10 @@ import path from 'path';
 import zlib from 'zlib';
 import { getInstId } from './marketData.ts';
 import type { AssetId, CollectorStatus, MicroTick } from './types.ts';
+import { JOURNAL_DIR } from './paths.ts';
 
 const OKX_API = 'https://www.okx.com/api/v5';
-const MICRO_ARCHIVE_DIR = path.resolve(process.cwd(), 'journal', 'micro');
+const MICRO_ARCHIVE_DIR = path.join(JOURNAL_DIR, 'micro');
 const MICRO_LIVE_DIR = path.resolve(process.cwd(), 'data', 'micro');
 const liveBuffer: MicroTick[] = [];
 

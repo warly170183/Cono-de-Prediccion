@@ -324,7 +324,7 @@ export interface JournalAssetData {
     vol_ann_pct: number;
     vol_pctile: number;
     regime_vol: string;
-    hmm: { state: string | null; p: number | null };
+    gmm: { state: string | null; p: number | null };
     readings: Record<string, number | null>;
     gex: Record<string, number | null>;
     flags: { fund: string; oi_flush: boolean | null };
@@ -349,7 +349,7 @@ export interface JournalAssetData {
     in90_opt: number | null;
     fund: string;
     oi_flush: boolean | null;
-    hmm: string | null;
+    gmm: string | null;
   }>;
   coverage: Array<{
     horizon: number;
