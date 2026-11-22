@@ -2,7 +2,16 @@
 
 Conos de volatilidad, derivados/GEX, opciones de trading y un sistema que evalúa si esas opciones aciertan.
 
-## Arrancar
+## Ejecutable (.exe)
+
+- **Sin instalar nada:** en GitHub → *Releases* → «Última versión (.exe)» → descarga `TradingPredictor.exe`.
+  Se regenera solo cada vez que se actualiza `main` (workflow `.github/workflows/build-exe.yml`).
+- **Generarlo tú:** `npm install` y `npm run build:exe` → `release/TradingPredictor.exe`.
+- Pon el `.exe` en una carpeta propia (p. ej. `TradingPredictor/`): al abrirlo arranca el servidor, abre el navegador y crea la carpeta `data/` **junto al .exe** con todos tus datos. Para actualizar a una versión nueva, reemplaza solo el `.exe`; `data/` se conserva.
+- Deja la ventana negra abierta mientras usas la app; al cerrarla se detiene. Windows puede mostrar el aviso «SmartScreen» la primera vez (el ejecutable no está firmado): *Más información → Ejecutar de todas formas*.
+- El `.exe` solo escucha en tu equipo (`127.0.0.1`).
+
+## Arrancar desde el código
 
 - Windows: doble clic en `iniciar.bat`
 - Mac/Linux: `./iniciar.sh`

@@ -3,9 +3,9 @@ import os from 'os';
 import path from 'path';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'opt-'));
 process.env.JOURNAL_DIR = tmp;
-const root = new URL('../server/', import.meta.url).pathname;
-const svc = await import(root + 'tradeOptionsService.ts');
-const { buildEvaluation } = await import(root + 'optionStats.ts');
+const root = new URL('../server/', import.meta.url);
+const svc = await import(new URL('tradeOptionsService.ts', root).href);
+const { buildEvaluation } = await import(new URL('optionStats.ts', root).href);
 
 const H = 3_600_000;
 const t0 = Date.UTC(2026, 10, 1, 0, 0, 0);

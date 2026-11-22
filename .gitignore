@@ -8,3 +8,4 @@ coverage/
 !.env.example
 # Datos del usuario (diario, opciones, copias, ajustes): nunca se suben ni se sobrescriben al actualizar
 data/
+release/

@@ -1,6 +1,6 @@
 import express from 'express';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
+import { exec } from 'child_process';
 import type { AssetId, RadarAssetItem } from './server/types.ts';
 import {
   fetchDeribitDvol,
@@ -45,6 +45,7 @@ import {
   stopMicroCollector,
 } from './server/microService.ts';
 import { getRotationAnalysis } from './server/rotationService.ts';
+import { IS_PACKAGED } from './server/paths.ts';
 import { backupData, dataStatus, heartbeat, migrateLegacyData, readSettings, startSession } from './server/storage.ts';
 import {
   closeRegisteredTradeOptionManual,
@@ -56,6 +57,12 @@ import {
   proposalToRegisteredRecord,
   upsertRegisteredTradeOption,
 } from './server/tradeOptionsService.ts';
+
+// Inyectado por el empaquetado (esbuild/CJS): ruta de la carpeta del bundle dentro del ejecutable.
+declare const __dirname: string;
+
+// El .exe siempre sirve la interfaz ya compilada (sin Vite en caliente).
+if (IS_PACKAGED) process.env.NODE_ENV = 'production';
 
 const VALID_ASSETS = new Set<AssetId>(['btc', 'eth', 'sol']);
 
@@ -637,13 +644,16 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== 'production') {
+    // Nombre en variable a propósito: el empaquetado del .exe no debe arrastrar Vite (solo se usa en desarrollo).
+    const viteModule = 'vite';
+    const { createServer: createViteServer } = (await import(viteModule)) as typeof import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path.resolve(process.cwd(), 'dist');
+    const distDir = IS_PACKAGED ? path.join(__dirname, '..', 'dist') : path.resolve(process.cwd(), 'dist');
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distDir, 'index.html'));
@@ -665,9 +675,17 @@ async function startServer() {
   process.on('SIGTERM', shutdown);
 
   const PORT = Number(process.env.PORT || 3000);
-  const HOST = process.env.HOST || '0.0.0.0';
+  const HOST = process.env.HOST || (IS_PACKAGED ? '127.0.0.1' : '0.0.0.0');
   app.listen(PORT, HOST, () => {
     console.log(`Trading Predictor server listening on http://${HOST}:${PORT}`);
+    if (IS_PACKAGED) {
+      const url = `http://localhost:${PORT}`;
+      console.log(`\nTrading Predictor en marcha: ${url}\nDeja esta ventana abierta mientras uses la app; ciérrala para detenerla.\n`);
+      if (process.env.NO_OPEN !== '1') {
+        const cmd = process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
+        exec(cmd, () => undefined);
+      }
+    }
     if (gapMs !== null && gapMs > 3_600_000) {
       console.log(`La app estuvo apagada ${(gapMs / 3_600_000).toFixed(1)} h; se retoma la recopilación y se evalúan las opciones pendientes.`);
     }

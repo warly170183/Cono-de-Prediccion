@@ -1,0 +1,45 @@
+name: Generar .exe
+
+# Cada vez que se actualiza main se compila el ejecutable de Windows.
+# Descárgalo en: Releases → "Última versión (.exe)"  (o en Actions → la ejecución → Artifacts).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      - name: Pruebas
+        run: npm test
+
+      - name: Compilar TradingPredictor.exe
+        run: npm run build:exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TradingPredictor-windows
+          path: release/TradingPredictor.exe
+
+      - name: Publicar en la release "latest"
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest release/TradingPredictor.exe \
+            --title "Última versión (.exe)" \
+            --notes "Generado automáticamente desde main (${{ github.sha }})." \
+            --prerelease
