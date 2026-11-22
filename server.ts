@@ -23,6 +23,7 @@ import {
   runWalkForwardCalibration,
   simulateCustomTrade,
 } from './server/quantEngine.ts';
+import { computeTargetProbability } from './server/coneTarget.ts';
 import {
   ensureTodayJournalSnapshots,
   exportJournalData,
@@ -200,6 +201,23 @@ async function startServer() {
     } catch (err) {
       console.error('Radar error:', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to compute radar' });
+    }
+  });
+
+  // Probabilidad de alcanzar un precio objetivo (cono GJR-GARCH + ensamble)
+  app.get('/api/cone/target', async (req, res) => {
+    try {
+      const asset = parseAsset(req.query.asset);
+      const price = Number(req.query.price);
+      const hours = Number(req.query.hours ?? 24);
+      if (!Number.isFinite(price) || price <= 0) {
+        res.status(400).json({ error: 'price inválido' });
+        return;
+      }
+      res.json(await computeTargetProbability(asset, price, Number.isFinite(hours) ? hours : 24));
+    } catch (err) {
+      console.error('Target probability error:', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to compute target probability' });
     }
   });
 

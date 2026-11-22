@@ -678,3 +678,19 @@ export interface TradeOptionsResponse {
   };
 }
 
+export interface TargetProbability {
+  asset: AssetId;
+  spot: number;
+  price: number;
+  distPct: number;
+  hours: number;
+  /** Probabilidad de tocar el nivel (con corrección de toque intravela). */
+  pTouchPct: number;
+  pCloseAbovePct: number;
+  pCloseBelowPct: number;
+  medianHoursToTouch: number | null;
+  quantiles: { p5: number; p25: number; p50: number; p75: number; p95: number };
+  sigmaHourPct: number;
+  ensRatio: { '24': number; '72': number };
+  generated: number;
+}

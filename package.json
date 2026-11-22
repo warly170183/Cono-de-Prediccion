@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/options-evaluation.test.mts && tsx tests/signals.test.mts && tsx tests/pipeline.test.mts",
+    "test": "tsx tests/options-evaluation.test.mts && tsx tests/signals.test.mts && tsx tests/pipeline.test.mts && tsx tests/cone.test.mts",
     "build:exe": "node scripts/build-exe.mjs"
   },
   "dependencies": {

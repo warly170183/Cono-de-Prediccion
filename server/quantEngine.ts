@@ -280,6 +280,11 @@ export function fitGjrGarch(rPct: number[]): GarchFitResult {
     stdResids[t] = rPct[t] / s;
   }
 
+  // Residuos estandarizados con media 0 y varianza 1: el bootstrap no debe inyectar deriva ni ensanchar/estrechar el cono.
+  const zMean = mean(stdResids);
+  const zSd = std(stdResids) || 1;
+  for (let t = 0; t < n; t++) stdResids[t] = (stdResids[t] - zMean) / zSd;
+
   return {
     params: { omega, alpha, gamma, beta, nu, persistence },
     condVolPct,
@@ -669,9 +674,12 @@ export function buildConeBlock(
           [0.15, 0.15],
         ] as const);
 
+  // Los caminos se muestrean al cierre de cada paso, pero el precio toca barreras DENTRO de la vela.
+  // Corrección de Broadie-Glasserman-Kou: se acerca la barrera 0,5826·σ del paso.
+  const BGK = 0.5826 * condVol;
   const touch = levels.map(([up, dn]) => {
-    const hiLog = Math.log(1 + up);
-    const loLog = Math.log(1 - dn);
+    const hiLog = Math.log(1 + up) - BGK;
+    const loLog = Math.log(1 - dn) + BGK;
     let upFirst = 0;
     let dnFirst = 0;
     let none = 0;

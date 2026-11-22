@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { OverviewResponse, WalkForwardOutput } from '../types.ts';
 import { ProbabilityConeChart } from './ProbabilityConeChart.tsx';
+import { TargetProbabilityCard } from './TargetProbabilityCard.tsx';
 
 interface Props {
   data: OverviewResponse;
@@ -250,6 +251,8 @@ export const ConeView: React.FC<Props> = ({ data }) => {
         )}
       </div>
 
+      <TargetProbabilityCard asset={data.asset} spot={data.h1.spot} />
+
       {/* Two-Column Analytics Below Chart */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* First Passage & Move Ranges */}
@@ -259,7 +262,7 @@ export const ConeView: React.FC<Props> = ({ data }) => {
               Probabilidad de Barreras (Primer Paso)
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Probabilidad de tocar primero el umbral alcista o bajista dentro de {block.H} {block.label === '1H' ? 'horas' : 'días'}.
+              Probabilidad de tocar primero el umbral alcista o bajista dentro de {block.H} {block.label === '1H' ? 'horas' : 'días'} (con corrección de toque intravela).
             </p>
           </div>
 
