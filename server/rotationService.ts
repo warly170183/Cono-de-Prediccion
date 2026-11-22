@@ -170,12 +170,13 @@ function statsFor(x: number[]): RotationVariantStats {
   };
 }
 
-function backtestVariant(
+export function backtestVariant(
   prices: Array<Array<number | null>>,
   symbolsCount: number,
   look: number,
   k: number,
   reb: number,
+  phase = 0,
 ) {
   const T = prices.length;
   const R: Array<Array<number | null>> = new Array(T);
@@ -194,7 +195,7 @@ function backtestVariant(
   let cur = new Float64Array(symbolsCount);
 
   for (let i = 0; i < T; i++) {
-    if (i > look + 1 && i % reb === 0) {
+    if (i > look + 1 && i % reb === phase % reb) {
       const scored: Array<{ j: number; s: number }> = [];
       for (let j = 0; j < symbolsCount; j++) {
         const p1 = prices[i - 1][j];
@@ -218,6 +219,8 @@ function backtestVariant(
   const exc: number[] = [];
   const netArr: number[] = [];
   const ewArr: number[] = [];
+  let turnSum = 0;
+  let turnN = 0;
 
   for (let t = start; t < T; t++) {
     const prevHeld = t >= 2 ? w[t - 2] : new Float64Array(symbolsCount);
@@ -238,13 +241,32 @@ function backtestVariant(
     }
     if (ewCnt === 0) continue;
     const ewRet = ewSum / ewCnt;
+    turnSum += turn;
+    turnN++;
     const netRet = gross - COST * turn;
     exc.push(netRet - ewRet);
     netArr.push(netRet);
     ewArr.push(ewRet);
   }
 
-  return { exc, netArr, ewArr };
+  return { exc, netArr, ewArr, avgTurnover: turnN ? turnSum / turnN : 0 };
+}
+
+export type RotationVerdict = 'sin_ventaja' | 'indicios' | 'robusta_con_sesgo';
+
+/** Veredicto conservador: nunca 'validada', porque el universo actual arrastra sesgo de supervivencia. */
+export function rotationVerdict(p: {
+  dsr: number;
+  nw_t: number;
+  ci_lo: number;
+  sharpe_h1: number;
+  sharpe_h2: number;
+  phase_pos_share: number;
+}): RotationVerdict {
+  const both = p.sharpe_h1 > 0 && p.sharpe_h2 > 0;
+  if (p.dsr > 0.95 && p.nw_t > 3 && p.ci_lo > 0 && both && p.phase_pos_share >= 0.8) return 'robusta_con_sesgo';
+  if (p.nw_t > 2 && both && p.phase_pos_share >= 0.6) return 'indicios';
+  return 'sin_ventaja';
 }
 
 function createRng(seed: number) {
@@ -293,7 +315,7 @@ export async function getRotationAnalysis(forceRefresh = false): Promise<Rotatio
 
     const primary = 'L30_k5_r7';
     const xPrim = seriesMap[primary] ?? [];
-    const { netArr: primNet, ewArr: ewRet } = backtestVariant(prices, symbols.length, 30, 5, 7);
+    const { netArr: primNet, ewArr: ewRet, avgTurnover } = backtestVariant(prices, symbols.length, 30, 5, 7);
 
     // Block bootstrap 95% CI (block = 14 days)
     const blk = 14;
@@ -319,6 +341,13 @@ export async function getRotationAnalysis(forceRefresh = false): Promise<Rotatio
     const ciLo = boots.length ? Number(boots[Math.floor(0.025 * (boots.length - 1))].toFixed(2)) : 0;
     const ciHi = boots.length ? Number(boots[Math.floor(0.975 * (boots.length - 1))].toFixed(2)) : 0;
 
+    // Robustez a la fase de rebalanceo: la misma regla desplazada 0..6 días no debería cambiar el resultado.
+    const phaseSrs: number[] = [];
+    for (let ph = 0; ph < 7; ph++) {
+      const { exc } = backtestVariant(prices, symbols.length, 30, 5, 7, ph);
+      phaseSrs.push(Number((sharpe(exc) * Math.sqrt(365)).toFixed(3)));
+    }
+    const phasePosShare = phaseSrs.filter((v) => v > 0).length / phaseSrs.length;
     const primStats = variants[primary];
     const primaryResult: RotationVariantStats = {
       ...primStats,
@@ -371,6 +400,17 @@ export async function getRotationAnalysis(forceRefresh = false): Promise<Rotatio
       best_variant: bestVariant,
       best_variant_result: variants[bestVariant],
       best_dsr: bestDsr,
+      phase_sharpes: phaseSrs,
+      phase_pos_share: Number(phasePosShare.toFixed(3)),
+      avg_turnover_day: Number(avgTurnover.toFixed(3)),
+      verdict: rotationVerdict({
+        dsr: primaryResult.dsr ?? 0,
+        nw_t: primaryResult.nw_t,
+        ci_lo: ciLo,
+        sharpe_h1: primaryResult.sharpe_h1,
+        sharpe_h2: primaryResult.sharpe_h2,
+        phase_pos_share: phasePosShare,
+      }),
       share_variants_sharpe_pos: Number(sharePos.toFixed(3)),
       variants,
       current_ranking: rankRows,

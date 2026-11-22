@@ -183,6 +183,11 @@ export interface RotationResponse {
   best_variant: string;
   best_variant_result: RotationVariantStats;
   best_dsr: number;
+  /** Sharpe anualizado del exceso de la primaria con el rebalanceo desplazado 0..6 días. */
+  phase_sharpes: number[];
+  phase_pos_share: number;
+  avg_turnover_day: number;
+  verdict: 'sin_ventaja' | 'indicios' | 'robusta_con_sesgo';
   share_variants_sharpe_pos: number;
   variants: Record<string, RotationVariantStats>;
   current_ranking: Array<{

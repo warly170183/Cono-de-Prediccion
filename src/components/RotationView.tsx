@@ -92,6 +92,32 @@ export const RotationView: React.FC<Props> = ({ data, loading, onRefresh }) => {
         </button>
       </div>
 
+      {/* Veredicto + robustez de fase */}
+      <div
+        className={`rounded-lg border p-4 text-xs ${
+          data.verdict === 'robusta_con_sesgo'
+            ? 'border-emerald-500/40 bg-emerald-500/8'
+            : data.verdict === 'indicios'
+              ? 'border-amber-500/40 bg-amber-500/8'
+              : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50'
+        }`}
+      >
+        <div className="font-display font-semibold text-sm text-slate-900 dark:text-slate-50">
+          Veredicto:{' '}
+          {data.verdict === 'robusta_con_sesgo'
+            ? 'Ventaja robusta (con sesgo de supervivencia sin descontar)'
+            : data.verdict === 'indicios'
+              ? 'Indicios, no concluyente'
+              : 'Sin ventaja demostrada'}
+        </div>
+        <p className="mt-1 text-slate-600 dark:text-slate-300 leading-relaxed">
+          Exige DSR &gt; 0,95, t &gt; 3, IC95 sobre cero, ambas mitades positivas y ≥ 80 % de las fases de rebalanceo con SR &gt; 0. Nunca se declara «validada»: el universo actual excluye monedas deslistadas.
+        </p>
+        <div className="mt-2 font-mono tabular-nums text-slate-500 dark:text-slate-400">
+          SR por fase (rebalanceo desplazado 0–6 d): {data.phase_sharpes.map((v) => v.toFixed(2)).join(' · ')} · {(data.phase_pos_share * 100).toFixed(0)} % positivas · Rotación media {(data.avg_turnover_day * 100).toFixed(0)} %/día
+        </div>
+      </div>
+
       {/* 4-Column KPI Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
