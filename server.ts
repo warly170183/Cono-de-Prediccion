@@ -45,6 +45,7 @@ import {
   stopMicroCollector,
 } from './server/microService.ts';
 import { getRotationAnalysis } from './server/rotationService.ts';
+import { optionalAuth, requireAuth } from './server/auth.ts';
 import {
   closeRegisteredTradeOptionManual,
   computeTradeOptions,
@@ -137,6 +138,15 @@ async function computeAssetOverview(asset: AssetId, refresh = false) {
 async function startServer() {
   const app = express();
   app.use(express.json());
+  app.use('/api', optionalAuth);
+  // Escrituras que modifican estado del servidor: exigen sesión Firebase.
+  // (/api/trades/simulate es cálculo puro y queda abierto.)
+  app.post('/api/trade-options/register', requireAuth);
+  app.patch('/api/trade-options/:id', requireAuth);
+  app.delete('/api/trade-options/:id', requireAuth);
+  app.post('/api/journal/auto', requireAuth);
+  app.post('/api/journal/run', requireAuth);
+  app.post('/api/micro/collector', requireAuth);
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, ts: Date.now() });

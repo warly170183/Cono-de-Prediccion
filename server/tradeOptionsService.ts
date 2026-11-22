@@ -32,6 +32,11 @@ import {
 const JOURNAL_DIR = path.resolve(process.cwd(), 'journal');
 const TRADE_OPTIONS_FILE = path.join(JOURNAL_DIR, 'trade_options.jsonl');
 const HOUR = 3_600_000;
+// Tope conservador: el edge direccional no está validado (AUC ≈ 0,51 en /api/results).
+const KELLY_CAP_PCT = 5;
+// Drift máximo (%/24 h) que la confluencia puede inyectar en la simulación.
+// 0 = neutro: el EV sale solo de geometría SL/TP + costes. Subirlo solo con edge medido forward.
+const EDGE_TILT_MAX_PCT_24H = Number(process.env.EDGE_TILT_MAX_PCT_24H ?? 0);
 const ROUND_TRIP_COST = 0.0007; // 0.07% mix maker/taker OKX
 
 function roundPx(val: number, spot: number): number {
@@ -317,7 +322,7 @@ function evaluateOnPaths(
     probTimeoutPct: Number(((toCnt / N) * 100).toFixed(1)),
     evPct: Number((ev * 100).toFixed(3)),
     evR: Number(evR.toFixed(3)),
-    kellyPct: Number(Math.min(35, kelly * 100).toFixed(1)),
+    kellyPct: Number(Math.min(KELLY_CAP_PCT, kelly * 100).toFixed(1)),
   };
 }
 
@@ -847,8 +852,8 @@ export async function computeTradeOptions(
 
       const factors = buildFactorsForDir(spec.dir);
       const confluenceScore = scoreConfluence(factors, spec.dir);
-      // Conservative conditional drift calibrated strictly by confluence excess over 50% (max ±0.40% / 24h)
-      const edgeTilt = ((confluenceScore - 50) / 50) * 0.4 * (isLong ? 1 : -1);
+      // Drift condicional por confluencia, DESACTIVADO por defecto (EDGE_TILT_MAX_PCT_24H=0).
+      const edgeTilt = ((confluenceScore - 50) / 50) * EDGE_TILT_MAX_PCT_24H * (isLong ? 1 : -1);
       const sim = evaluateOnPaths(cumPaths, spec.horizonHours, spec.dir, slPct, tp1Pct, edgeTilt);
 
       const confidence: TradeOptionProposal['confidence'] =
