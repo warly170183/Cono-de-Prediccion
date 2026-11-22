@@ -394,6 +394,9 @@ export const MicroView: React.FC<Props> = ({ asset }) => {
 
           {study.ic.length > 0 ? (
             <div className="overflow-x-auto">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2">
+                «Operable» exige: ventaja esperada (|ρ|·σ del retorno) mayor que el coste ida y vuelta (spread + 2 comisiones taker), p Bonferroni &lt; 0,05 y el mismo signo en los 3 tercios temporales. Los huecos del colector se excluyen para no mezclar horizontes.
+              </p>
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
@@ -403,6 +406,9 @@ export const MicroView: React.FC<Props> = ({ asset }) => {
                     <th className="py-2 text-right font-medium">IC Spearman (ρ)</th>
                     <th className="py-2 text-right font-medium">p-valor</th>
                     <th className="py-2 text-right font-medium">p Bonferroni</th>
+                    <th className="py-2 text-right font-medium">Ventaja / coste (bps)</th>
+                    <th className="py-2 text-right font-medium">Tercios (signo)</th>
+                    <th className="py-2 text-right font-medium">¿Operable?</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70 font-mono tabular-nums">
@@ -421,6 +427,17 @@ export const MicroView: React.FC<Props> = ({ asset }) => {
                       </td>
                       <td className="py-2 text-right">{row.p.toFixed(4)}</td>
                       <td className="py-2 text-right">{row.p_bonf.toFixed(4)}</td>
+                      <td className="py-2 text-right">
+                        {row.edge_bps.toFixed(2)} / {row.cost_bps.toFixed(1)}
+                      </td>
+                      <td className="py-2 text-right">{row.folds_same_sign === null ? '—' : `${row.folds_same_sign}/3`}</td>
+                      <td
+                        className={`py-2 text-right font-sans font-medium ${
+                          row.viable ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        {row.viable ? 'Sí' : 'No'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

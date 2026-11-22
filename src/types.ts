@@ -491,6 +491,10 @@ export interface MicroStudyResponse {
     p: number;
     p_bonf: number;
     n: number;
+    edge_bps: number;
+    cost_bps: number;
+    folds_same_sign: number | null;
+    viable: boolean;
   }>;
   recent_series: Array<{
     ts: number;

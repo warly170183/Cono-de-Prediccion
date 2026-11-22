@@ -152,7 +152,11 @@ async function writeCollectorBar() {
     okxGet<Array<{ oiCcy: string }>>('public/open-interest', { instType: 'SWAP', instId: inst }),
   ]);
 
-  if (!book?.[0]?.bids?.length || !book?.[0]?.asks?.length) return;
+  if (!book?.[0]?.bids?.length || !book?.[0]?.asks?.length) {
+    // La barra se pierde: el flujo acumulado pasa a la siguiente, que queda marcada como incompleta.
+    collector.acc.missed = 1;
+    return;
+  }
   const bids = book[0].bids.map((x) => [Number(x[0]), Number(x[1]) * collector.ctVal] as [number, number]);
   const asks = book[0].asks.map((x) => [Number(x[0]), Number(x[1]) * collector.ctVal] as [number, number]);
   const bb = bids[0];
@@ -427,8 +431,22 @@ function spearmanCorr(x: number[], y: number[]): { rho: number; p: number } {
   return { rho, p };
 }
 
+/** Comisión taker por lado en OKX (bps), supuesto conservador para el coste de viabilidad. */
+export const TAKER_FEE_BPS = 5;
+const MIN_MS = 60_000;
+
+/** Las barras deben ser contiguas: tras reinicios del colector hay huecos y no se pueden mezclar. */
+function contiguous(rows: MicroTick[], i: number, j: number, minutes: number): boolean {
+  if (i < 0 || j >= rows.length || i >= j) return false;
+  return Math.abs(rows[j].ts - rows[i].ts - minutes * MIN_MS) <= MIN_MS / 2;
+}
+
 export function computeMicroStudy() {
   const { files, rows } = loadArchivedMicroTicks();
+  return studyFromRows(files, rows);
+}
+
+export function studyFromRows(files: string[], rows: MicroTick[]) {
   const nRows = rows.length;
   const minRowsRequired = 5000;
   const readyForWalkForward = nRows >= minRowsRequired;
@@ -441,7 +459,7 @@ export function computeMicroStudy() {
     const flow1m = r.missed === 0 && totFlow > 0 ? (r.tk_buy_btc - r.tk_sell_btc) / totFlow : null;
     const depthRatio =
       r.depth_bid_btc > 0 && r.depth_ask_btc > 0 ? Math.log(r.depth_bid_btc / r.depth_ask_btc) : null;
-    const ret15m = i >= 15 && rows[i - 15].mid > 0 ? Math.log(r.mid / rows[i - 15].mid) * 1e4 : null;
+    const ret15m = contiguous(rows, i - 15, i, 15) && rows[i - 15].mid > 0 ? Math.log(r.mid / rows[i - 15].mid) * 1e4 : null;
     return {
       ts: r.ts,
       mid: r.mid,
@@ -468,23 +486,49 @@ export function computeMicroStudy() {
     p: number;
     p_bonf: number;
     n: number;
+    /** Movimiento esperado (bps) por 1 desv. típica de señal: |IC|·σ del retorno. */
+    edge_bps: number;
+    /** Coste ida y vuelta (bps): spread medio + 2 comisiones taker. */
+    cost_bps: number;
+    /** Nº de tercios temporales (de 3) con el mismo signo de IC que el total; null si hay pocos datos. */
+    folds_same_sign: number | null;
+    viable: boolean;
   }> = [];
+  const meanSpreadAll = nRows ? rows.reduce((s, r) => s + r.spread_bps, 0) / nRows : 0;
+  const costBps = meanSpreadAll + 2 * TAKER_FEE_BPS;
 
   const nTests = features.length * horizons.length;
   for (const h of horizons) {
     for (const feat of features) {
       const xs: number[] = [];
       const ys: number[] = [];
+      const idx: number[] = [];
       for (let i = 0; i < nRows - h; i += h) {
+        if (!contiguous(rows, i, i + h, h)) continue;
         const xv = series[i][feat];
         const yv = Math.log(series[i + h].mid / series[i].mid);
         if (xv !== null && Number.isFinite(xv) && Number.isFinite(yv)) {
           xs.push(xv);
           ys.push(yv);
+          idx.push(i);
         }
       }
       if (xs.length >= 12) {
         const { rho, p } = spearmanCorr(xs, ys);
+        const mY = ys.reduce((a, b) => a + b, 0) / ys.length;
+        const sdY = Math.sqrt(ys.reduce((a, b) => a + (b - mY) ** 2, 0) / Math.max(1, ys.length - 1));
+        let folds: number | null = null;
+        if (xs.length >= 45) {
+          const third = Math.floor(xs.length / 3);
+          folds = 0;
+          for (let f = 0; f < 3; f++) {
+            const a = f * third;
+            const b = f === 2 ? xs.length : a + third;
+            const r = spearmanCorr(xs.slice(a, b), ys.slice(a, b)).rho;
+            if (Math.sign(r) === Math.sign(rho) && rho !== 0) folds++;
+          }
+        }
+        const edgeBps = Math.abs(rho) * sdY * 1e4;
         icResults.push({
           h,
           feature: feat,
@@ -492,6 +536,10 @@ export function computeMicroStudy() {
           p: Number(p.toFixed(4)),
           p_bonf: Number(Math.min(1, p * nTests).toFixed(4)),
           n: xs.length,
+          edge_bps: Number(edgeBps.toFixed(3)),
+          cost_bps: Number(costBps.toFixed(3)),
+          folds_same_sign: folds,
+          viable: edgeBps > costBps && p * nTests < 0.05 && (folds ?? 0) >= 3,
         });
       }
     }
