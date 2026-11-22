@@ -59,13 +59,36 @@ check('segunda pasada sin cambios', again.changed === false);
 const ev = buildEvaluation(res);
 console.log(JSON.stringify({ n: ev.overall.n, tp: ev.overall.tpHit, sl: ev.overall.slHit, exp: ev.overall.expired, tpRate: ev.overall.tpRatePct, win: ev.overall.winDecidedPct, mirror: ev.overall.mirrorTpRatePct, dirN: ev.overall.dirN, dirAcc: ev.overall.dirAccPct, indep: ev.overall.dirIndepN, be: ev.overall.breakevenPct, verdict: ev.verdict.level }));
 check('verdict insuficiente con 5 muestras', ev.verdict.level === 'insufficient');
-// verdict con muestra grande: 60 independientes, 40 aciertos
-const rows = Array.from({ length: 60 }, (_, i) => mk('x'+i, 'long', t0 + i * 30 * H, { status: 'tp_hit', dirCorrect: i < 40, mirrorStatus: 'sl_hit', horizonDone: true, closeRetPct: 1 })) as any;
-const big = buildEvaluation(rows);
-console.log(big.verdict.level, big.overall.dirIndepN, big.overall.dirIndepAccPct, big.overall.dirCi95, big.overall.dirPValue);
-check('verdict edge con 40/60', big.verdict.level === 'edge');
-const coin = buildEvaluation(Array.from({ length: 60 }, (_, i) => mk('y'+i, 'long', t0 + i * 30 * H, { status: 'sl_hit', dirCorrect: i % 2 === 0, horizonDone: true })) as any);
-check('verdict no_edge con 30/60', coin.verdict.level === 'no_edge');
+// verdict sin ventaja: direcciones mixtas, acierto 50 % en mercado 50/50
+const coin = buildEvaluation(Array.from({ length: 60 }, (_, i) => { const right = i % 2 === 0; return mk('y'+i, i % 4 < 2 ? 'long' : 'short', t0 + i * 30 * H, { status: 'sl_hit', dirCorrect: right, closeRetPct: right ? 1 : -1, horizonDone: true }); }) as any);
+check('verdict no_edge con 50 % y mercado 50/50', coin.verdict.level === 'no_edge');
 // solape: 60 opciones cada 4h con horizonte 24h -> independientes ~ 60*4/24 = 10
 const ov = buildEvaluation(Array.from({ length: 60 }, (_, i) => mk('z'+i, 'long', t0 + i * 4 * H, { status: 'tp_hit', dirCorrect: true, horizonDone: true })) as any);
 check('independientes por solape (~10)', ov.overall.dirIndepN >= 9 && ov.overall.dirIndepN <= 11);
+
+// ---- Mejoras: línea base, confluencia, calibración, contexto, progreso, series
+{
+  const t = Date.UTC(2026, 10, 1);
+  // Mercado siempre alcista: un "siempre largo" acierta el 100 % sin saber nada -> habilidad ~0, no 'edge'
+  const bull = Array.from({ length: 40 }, (_, i) => mk('u' + i, 'long', t + i * 30 * H, { status: 'tp_hit', dirCorrect: true, closeRetPct: 2, horizonDone: true, mirrorStatus: 'sl_hit', realizedPnlPct: 3, evaluatedTs: t + i * 30 * H + 5 * H, asset: 'btc' })) as any;
+  const ev = buildEvaluation(bull);
+  check('siempre largo en mercado alcista NO es ventaja (línea base 100 %)', ev.verdict.level !== 'edge' && ev.headline.baselinePct === 100);
+  // Mezcla de largos/cortos con direccion acertando 75 % en mercado 50/50 -> edge
+  const skilled = Array.from({ length: 80 }, (_, i) => {
+    const long = i % 2 === 0; const right = i % 4 !== 3; // 75 %
+    const raw = (long ? 1 : -1) * (right ? 1 : -1); // retorno de mercado
+    return mk('s' + i, long ? 'long' : 'short', t + i * 30 * H, { status: right ? 'tp_hit' : 'sl_hit', dirCorrect: right, closeRetPct: right ? 1 : -1, horizonDone: true, asset: 'btc', evaluatedTs: t + i * 30 * H + 3 * H, realizedPnlPct: right ? 2 : -2, confluenceScore: right ? 80 : 50, ctx: { regime: 'Normal', trendBias: 'alcista', marketRegime: 'trend', biasDirection: 'alcista', adx: 25 } });
+  }) as any;
+  const e2 = buildEvaluation(skilled);
+  check('75 % con mercado 50/50 => edge', e2.verdict.level === 'edge');
+  check('bins de confluencia ordenados', e2.byConfluence.map((g: any) => g.key).join() === '<55,>=75');
+  check('contexto agrupado por régimen', e2.byRegime.some((g: any) => g.label === 'Volatilidad Normal'));
+  check('series: acierto y PnL', e2.timeline.accuracy.length === e2.headline.n && e2.timeline.pnl.length === 80);
+  check('progreso con ETA 0 al llegar a 30', e2.progress.etaDays === 0);
+  const e3 = buildEvaluation([]);
+  check('sin datos: ETA estimada > 0', (e3.progress.etaDays ?? 0) > 0 && e3.verdict.level === 'insufficient');
+  // Calibración: predicho 35 % y acierta el 35 %
+  const cal = Array.from({ length: 40 }, (_, i) => mk('c' + i, 'long', t + i * 30 * H, { status: i < 14 ? 'tp_hit' : 'sl_hit', probTpPct: 35 })) as any;
+  const e4 = buildEvaluation(cal);
+  check('calibración 35 % vs 35 %', e4.calibration[0].predictedPct === 35 && e4.calibration[0].actualPct === 35 && e4.brier !== null);
+}

@@ -47,6 +47,7 @@ import {
 import { getRotationAnalysis } from './server/rotationService.ts';
 import {
   closeRegisteredTradeOptionManual,
+  contextOf,
   computeTradeOptions,
   deleteRegisteredTradeOptionById,
   ensureAutoTradeOptionsForAllAssets,
@@ -352,7 +353,7 @@ async function startServer() {
         return res.status(404).json({ error: 'No se encontró la opción de trading solicitada' });
       }
       const now = Date.now();
-      const record = proposalToRegisteredRecord(match, 'manual', now, `m_${now}`);
+      const record = proposalToRegisteredRecord(match, 'manual', now, `m_${now}`, undefined, contextOf(data.regime, data.technicals, data.marketBias));
       upsertRegisteredTradeOption(record);
       const updated = await computeTradeOptions(asset, false, false);
       res.json({ saved: record, options: updated });

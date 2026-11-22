@@ -520,6 +520,14 @@ export interface RegisteredTradeOption {
   mirrorStatus?: 'tp_hit' | 'sl_hit' | 'expired' | null;
   /** true cuando ya se evaluó el horizonte completo. */
   horizonDone?: boolean;
+  /** Contexto de mercado congelado al crear la opción (para saber en qué condiciones funciona). */
+  ctx?: {
+    regime: string;
+    trendBias: string;
+    marketRegime: string;
+    biasDirection: string;
+    adx: number;
+  };
 }
 
 export interface TradeOptionGroupStats {
@@ -549,6 +557,12 @@ export interface TradeOptionGroupStats {
   dirIndepAccPct: number | null;
   dirCi95: [number, number] | null;
   dirPValue: number | null;
+  /** Acierto esperado si la dirección no tuviera relación con el resultado (depende de cuántos largos/cortos y de cuánto subió el mercado). */
+  dirBaselinePct: number | null;
+  /** Acierto observado menos acierto esperado por azar (puntos porcentuales). */
+  dirSkillPp: number | null;
+  /** p-valor de ese exceso sobre el azar (test normal sobre suma de Bernoullis, bilateral). */
+  dirSkillP: number | null;
   avgPnlPct: number | null;
   avgCloseRetPct: number | null;
 }
@@ -560,6 +574,26 @@ export interface TradeOptionEvaluation {
   byConfidence: TradeOptionGroupStats[];
   byAsset: TradeOptionGroupStats[];
   byRank: TradeOptionGroupStats[];
+  byConfluence: TradeOptionGroupStats[];
+  byRegime: TradeOptionGroupStats[];
+  byMarketRegime: TradeOptionGroupStats[];
+  /** Fiabilidad de la probabilidad de TP que anuncia la app. */
+  calibration: Array<{ label: string; n: number; predictedPct: number; actualPct: number }>;
+  brier: { score: number; baseline: number; n: number } | null;
+  /** Resultado principal: opciones sin solape por activo (conservador). */
+  headline: {
+    n: number;
+    accPct: number | null;
+    baselinePct: number | null;
+    skillPp: number | null;
+    pValue: number | null;
+    ci95: [number, number] | null;
+  };
+  progress: { n: number; needed: number; etaDays: number | null; firstTs: number | null };
+  timeline: {
+    accuracy: Array<{ ts: number; n: number; accPct: number; baselinePct: number }>;
+    pnl: Array<{ ts: number; cumPnlPct: number }>;
+  };
   verdict: { level: 'insufficient' | 'no_edge' | 'edge' | 'worse'; text: string };
   minIndependent: number;
 }

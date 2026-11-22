@@ -29,7 +29,7 @@ import {
   simulateGarchPaths,
 } from './quantEngine.ts';
 
-import { JOURNAL_DIR } from './paths.ts';
+import { JOURNAL_DIR, atomicWrite } from './paths.ts';
 import { buildEvaluation } from './optionStats.ts';
 const TRADE_OPTIONS_FILE = path.join(JOURNAL_DIR, 'trade_options.jsonl');
 const HOUR = 3_600_000;
@@ -339,10 +339,9 @@ export function loadRegisteredTradeOptions(): RegisteredTradeOption[] {
 function writeRegisteredTradeOptions(rows: RegisteredTradeOption[]) {
   fs.mkdirSync(JOURNAL_DIR, { recursive: true });
   const sorted = [...rows].sort((a, b) => b.createdTs - a.createdTs);
-  fs.writeFileSync(
+  atomicWrite(
     TRADE_OPTIONS_FILE,
     sorted.map((r) => JSON.stringify(r)).join('\n') + (sorted.length ? '\n' : ''),
-    'utf-8',
   );
 }
 
@@ -523,12 +522,28 @@ function summarizeTradeOptionStats(rows: RegisteredTradeOption[]) {
   };
 }
 
+/** Contexto de mercado que se congela junto a cada opción. */
+export function contextOf(
+  regime: { current: string },
+  tech: { trendBias: string; adx14: number },
+  bias: { activeRegime: string; biasDirection: string },
+): NonNullable<RegisteredTradeOption['ctx']> {
+  return {
+    regime: regime.current,
+    trendBias: tech.trendBias,
+    marketRegime: bias.activeRegime,
+    biasDirection: bias.biasDirection,
+    adx: tech.adx14,
+  };
+}
+
 export function proposalToRegisteredRecord(
   p: TradeOptionProposal,
   source: 'auto' | 'manual',
   createdTs: number,
   bucketSuffix?: string,
   rank?: number,
+  ctx?: RegisteredTradeOption['ctx'],
 ): RegisteredTradeOption {
   const safeId = bucketSuffix ? `${p.asset}_${p.strategyKey}_${bucketSuffix}` : p.id;
   return {
@@ -562,6 +577,7 @@ export function proposalToRegisteredRecord(
     maePct: null,
     summary: p.rationale[0]?.slice(0, 200) ?? `${p.title} (${p.dir})`,
     ...(rank !== undefined ? { rank } : {}),
+    ...(ctx ? { ctx } : {}),
   };
 }
 
@@ -1060,7 +1076,7 @@ export async function computeTradeOptions(
     if (autoRecordTop) {
       const knownIds = new Set(loadRegisteredTradeOptions().map((r) => r.id));
       proposals.forEach((p, idx) => {
-        const rec = proposalToRegisteredRecord(p, 'auto', anchorTs, bucketKey, idx + 1);
+        const rec = proposalToRegisteredRecord(p, 'auto', anchorTs, bucketKey, idx + 1, contextOf(regime, tech, marketBias));
         if (!knownIds.has(rec.id)) upsertRegisteredTradeOption(rec);
       });
     }

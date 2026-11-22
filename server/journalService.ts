@@ -18,7 +18,7 @@ import {
   computeOptionsCone,
 } from './quantEngine.ts';
 
-import { JOURNAL_DIR } from './paths.ts';
+import { JOURNAL_DIR, atomicWrite } from './paths.ts';
 const HOUR = 3_600_000;
 const HZ = [24, 72] as const;
 const QS = ['5', '10', '25', '50', '75', '90', '95'] as const;
@@ -54,7 +54,7 @@ export function saveJournalPrediction(asset: AssetId, record: JournalRecord) {
   const sorted = Array.from(byId.keys())
     .sort()
     .map((k) => JSON.stringify(byId.get(k)));
-  fs.writeFileSync(predPath(asset), sorted.join('\n') + '\n', 'utf-8');
+  atomicWrite(predPath(asset), sorted.join('\n') + '\n');
 }
 
 function interpPit(x: number, q: Record<string, number>): number {
