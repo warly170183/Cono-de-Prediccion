@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { BookmarkPlus, Check, RefreshCw, Trash2, XCircle } from 'lucide-react';
+import { OptionsEvaluationPanel } from './OptionsEvaluationPanel.tsx';
 import type {
   AssetId,
   ProposalRegimeTag,
@@ -12,7 +13,6 @@ import type {
 interface Props {
   asset: AssetId;
   data: TradeOptionsResponse | null;
-  cloudOptions: RegisteredTradeOption[];
   loading: boolean;
   registeringKey: string | null;
   onRefresh: () => void;
@@ -38,7 +38,6 @@ function fmtPx(px: number | null | undefined, spot: number): string {
 export const TradeOptionsView: React.FC<Props> = ({
   asset,
   data,
-  cloudOptions,
   loading,
   registeringKey,
   onRefresh,
@@ -50,12 +49,10 @@ export const TradeOptionsView: React.FC<Props> = ({
   const [proposalRegimeFilter, setProposalRegimeFilter] = useState<'all' | ProposalRegimeTag>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const mergedRegistered = useMemo(() => {
-    const byId = new Map<string, RegisteredTradeOption>();
-    for (const c of cloudOptions) byId.set(c.id, c);
-    for (const s of data?.registered ?? []) byId.set(s.id, s);
-    return Array.from(byId.values()).sort((a, b) => b.createdTs - a.createdTs);
-  }, [data?.registered, cloudOptions]);
+  const mergedRegistered = useMemo(
+    () => [...(data?.registered ?? [])].sort((a, b) => b.createdTs - a.createdTs),
+    [data?.registered],
+  );
 
   const stats = useMemo(() => {
     const closed = mergedRegistered.filter((r) => r.status !== 'open');
@@ -704,6 +701,8 @@ export const TradeOptionsView: React.FC<Props> = ({
         </div>
         )}
       </div>
+
+      <OptionsEvaluationPanel evaluation={data?.stats.evaluation} />
 
       {/* Registered Trade Options Audit Log */}
       <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-5 space-y-4">

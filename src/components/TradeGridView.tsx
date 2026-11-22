@@ -1,20 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BookmarkPlus, Trash2 } from 'lucide-react';
 import type { TradeAnalysisResponse, TradeGridRow } from '../types.ts';
-import { useAuth } from '../lib/AuthContext.tsx';
 import {
   deleteTradePreset,
+  loadTradePresets,
   saveTradePreset,
-  subscribeTradePresets,
-  type CloudTradePreset,
-} from '../lib/firebase.ts';
+  type LocalTradePreset,
+} from '../lib/localPresets.ts';
 
 interface Props {
   data: TradeAnalysisResponse;
 }
 
 export const TradeGridView: React.FC<Props> = ({ data }) => {
-  const { user, authReady, signInWithGoogle } = useAuth();
   const [dir, setDir] = useState<'long' | 'short'>('long');
 
   // What-If Simulator State
@@ -26,31 +24,14 @@ export const TradeGridView: React.FC<Props> = ({ data }) => {
   const [simResult, setSimResult] = useState<TradeGridRow | null>(null);
   const [simLoading, setSimLoading] = useState(false);
   const [simError, setSimError] = useState<string | null>(null);
-  const [presets, setPresets] = useState<CloudTradePreset[]>([]);
+  const [presets, setPresets] = useState<LocalTradePreset[]>(() => loadTradePresets());
   const [savingPreset, setSavingPreset] = useState(false);
-
-  useEffect(() => {
-    if (!authReady || !user) {
-      setPresets([]);
-      return;
-    }
-    const unsub = subscribeTradePresets(
-      user.uid,
-      (items) => setPresets(items),
-      (err) => console.error('Trade presets error:', err),
-    );
-    return () => unsub();
-  }, [authReady, user]);
 
   const handleSavePreset = async () => {
     if (!simResult) return;
-    if (!user) {
-      await signInWithGoogle();
-      return;
-    }
     setSavingPreset(true);
     try {
-      await saveTradePreset(user.uid, {
+      const next = saveTradePreset({
         asset: data.asset,
         dir: simDir,
         slPct,
@@ -59,6 +40,7 @@ export const TradeGridView: React.FC<Props> = ({ data }) => {
         drift24hPct,
         result: simResult,
       });
+      setPresets(next);
     } finally {
       setSavingPreset(false);
     }
@@ -330,16 +312,16 @@ export const TradeGridView: React.FC<Props> = ({ data }) => {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <BookmarkPlus className="w-3.5 h-3.5" />
-                <span>{user ? (savingPreset ? 'Guardando…' : 'Guardar escenario en la nube') : 'Conectar nube y guardar'}</span>
+                <span>{savingPreset ? 'Guardando…' : 'Guardar escenario'}</span>
               </button>
             </div>
           </div>
         )}
 
-        {user && presets.length > 0 && (
+        {presets.length > 0 && (
           <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
             <div className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">
-              Escenarios guardados en tu nube ({presets.length})
+              Escenarios guardados en este navegador ({presets.length})
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs font-mono tabular-nums">
@@ -399,7 +381,7 @@ export const TradeGridView: React.FC<Props> = ({ data }) => {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            void deleteTradePreset(user.uid, p.id);
+                            setPresets(deleteTradePreset(p.id));
                           }}
                           className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer"
                           title="Eliminar escenario"

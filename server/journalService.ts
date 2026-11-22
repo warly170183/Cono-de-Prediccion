@@ -45,40 +45,6 @@ function normalizeRecord(asset: AssetId, raw: JournalRecord): JournalRecord {
   return r;
 }
 
-function isValidRecord(r: unknown): r is JournalRecord {
-  const x = r as Partial<JournalRecord> | null;
-  return (
-    !!x &&
-    typeof x.id === 'string' &&
-    /^\d{4}-\d{2}-\d{2}$/.test(x.id) &&
-    typeof x.anchor_ts === 'number' &&
-    x.anchor_ts > 0 &&
-    typeof x.spot === 'number' &&
-    x.spot > 0 &&
-    typeof x.cone === 'object' &&
-    x.cone !== null
-  );
-}
-
-/** Añade solo los registros que faltan en disco (nunca sobrescribe). Devuelve cuántos añadió. */
-export function restoreJournalPredictions(asset: AssetId, records: unknown[]): number {
-  const existing = loadJournalPredictions(asset);
-  const have = new Set(existing.map((r) => r.id));
-  const added: JournalRecord[] = [];
-  for (const raw of records) {
-    if (!isValidRecord(raw) || have.has(raw.id)) continue;
-    have.add(raw.id);
-    added.push(normalizeRecord(asset, raw));
-  }
-  if (!added.length) return 0;
-  fs.mkdirSync(JOURNAL_DIR, { recursive: true });
-  const byId = new Map<string, JournalRecord>();
-  for (const r of [...existing, ...added]) byId.set(r.id, r);
-  const lines = Array.from(byId.keys()).sort().map((k) => JSON.stringify(byId.get(k)));
-  fs.writeFileSync(predPath(asset), lines.join('\n') + '\n', 'utf-8');
-  return added.length;
-}
-
 export function saveJournalPrediction(asset: AssetId, record: JournalRecord) {
   fs.mkdirSync(JOURNAL_DIR, { recursive: true });
   const existing = loadJournalPredictions(asset);

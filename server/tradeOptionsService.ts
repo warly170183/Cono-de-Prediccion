@@ -30,6 +30,7 @@ import {
 } from './quantEngine.ts';
 
 import { JOURNAL_DIR } from './paths.ts';
+import { buildEvaluation } from './optionStats.ts';
 const TRADE_OPTIONS_FILE = path.join(JOURNAL_DIR, 'trade_options.jsonl');
 const HOUR = 3_600_000;
 // Tope conservador: el edge direccional no está validado (AUC ≈ 0,51 en /api/results).
@@ -354,39 +355,6 @@ export function upsertRegisteredTradeOption(row: RegisteredTradeOption): Registe
   return row;
 }
 
-/**
- * Rehidrata desde la copia en Firestore las operaciones que faltan en disco.
- * Una operación abierta local se actualiza si la copia en la nube ya está cerrada.
- */
-export function restoreRegisteredTradeOptions(rows: unknown[]): number {
-  const existing = loadRegisteredTradeOptions();
-  const byId = new Map<string, RegisteredTradeOption>();
-  for (const r of existing) byId.set(r.id, r);
-  let changed = 0;
-  for (const raw of rows) {
-    const x = raw as Partial<RegisteredTradeOption> | null;
-    const ok =
-      !!x &&
-      typeof x.id === 'string' &&
-      /^[a-zA-Z0-9_-]{1,128}$/.test(x.id) &&
-      (x.asset === 'btc' || x.asset === 'eth' || x.asset === 'sol') &&
-      (x.dir === 'long' || x.dir === 'short') &&
-      typeof x.entryPrice === 'number' &&
-      x.entryPrice > 0 &&
-      typeof x.createdTs === 'number' &&
-      typeof x.status === 'string';
-    if (!ok) continue;
-    const row = x as RegisteredTradeOption;
-    const local = byId.get(row.id);
-    if (!local || (local.status === 'open' && row.status !== 'open')) {
-      byId.set(row.id, row);
-      changed++;
-    }
-  }
-  if (changed) writeRegisteredTradeOptions(Array.from(byId.values()));
-  return changed;
-}
-
 export function deleteRegisteredTradeOptionById(id: string): boolean {
   const existing = loadRegisteredTradeOptions();
   const filtered = existing.filter((r) => r.id !== id);
@@ -418,8 +386,41 @@ export function closeRegisteredTradeOptionManual(
   return updated;
 }
 
+type ScanOutcome = { outcome: 'tp' | 'sl' | 'none'; idx: number; mfe: number; mae: number };
+
 /**
- * Evaluates open registered trade options against subsequent closed 1H OKX candles.
+ * Recorre velas 1H cerradas buscando el primer toque de TP o SL.
+ * Si TP y SL caen en la misma vela, se asume SL primero (criterio conservador).
+ */
+function scanTpSl(
+  future: Candle[],
+  isLong: boolean,
+  entry: number,
+  stop: number,
+  target: number,
+): ScanOutcome {
+  let mfe = 0;
+  let mae = 0;
+  for (let i = 0; i < future.length; i++) {
+    const high = future[i][2];
+    const low = future[i][3];
+    const fav = isLong ? (high / entry - 1) * 100 : (1 - low / entry) * 100;
+    const adv = isLong ? (low / entry - 1) * 100 : (1 - high / entry) * 100;
+    mfe = Math.max(mfe, fav);
+    mae = Math.min(mae, adv);
+    const hitSl = isLong ? low <= stop : high >= stop;
+    const hitTp = isLong ? high >= target : low <= target;
+    if (hitSl) return { outcome: 'sl', idx: i, mfe, mae };
+    if (hitTp) return { outcome: 'tp', idx: i, mfe, mae };
+  }
+  return { outcome: 'none', idx: -1, mfe, mae };
+}
+
+/**
+ * Evalúa las opciones registradas contra las velas 1H cerradas posteriores a su creación.
+ * - Estado (TP1 / SL / expirada): se resuelve en cuanto el precio toca TP1 o SL.
+ * - Con el horizonte completo se calculan además: TP2, dirección acertada al cierre del
+ *   horizonte, retorno final y el resultado de la operación espejo (control de azar).
  */
 export function evaluateTradeOptionsWithCandles(
   asset: AssetId,
@@ -430,81 +431,75 @@ export function evaluateTradeOptionsWithCandles(
 
   for (let i = 0; i < all.length; i++) {
     const op = all[i];
-    if (op.asset !== asset || op.status !== 'open') continue;
+    if (op.asset !== asset) continue;
 
     const expiryTs = op.createdTs + op.horizonHours * HOUR;
     const future = candles1h.filter((c) => c[0] > op.createdTs && c[0] <= expiryTs);
     if (future.length === 0) continue;
 
+    const complete = future.length >= op.horizonHours;
+    const needsStatus = op.status === 'open';
+    const needsHorizon = complete && !op.horizonDone;
+    if (!needsStatus && !needsHorizon) continue;
+
     const isLong = op.dir === 'long';
-    let mfe = 0;
-    let mae = 0;
-    let resolved: RegisteredTradeOption | null = null;
+    const sign = isLong ? 1 : -1;
+    const main = scanTpSl(future, isLong, op.entryPrice, op.stopLoss, op.takeProfit1);
+    let next: RegisteredTradeOption = { ...op };
 
-    for (const c of future) {
-      const high = c[2];
-      const low = c[3];
-      const favMove = isLong ? (high / op.entryPrice - 1) * 100 : (1 - low / op.entryPrice) * 100;
-      const advMove = isLong ? (low / op.entryPrice - 1) * 100 : (1 - high / op.entryPrice) * 100;
-      mfe = Math.max(mfe, favMove);
-      mae = Math.min(mae, advMove);
-
-      const hitSl = isLong ? low <= op.stopLoss : high >= op.stopLoss;
-      const hitTp = isLong ? high >= op.takeProfit1 : low <= op.takeProfit1;
-
-      // Conservative ordering: if both SL and TP occur in the same 1H candle, SL triggers first
-      if (hitSl) {
-        const pnl = isLong
-          ? (op.stopLoss / op.entryPrice - 1) - ROUND_TRIP_COST
-          : (1 - op.stopLoss / op.entryPrice) - ROUND_TRIP_COST;
-        resolved = {
-          ...op,
-          status: 'sl_hit',
-          evaluatedTs: c[0],
-          exitPrice: op.stopLoss,
+    if (needsStatus) {
+      const stats = { mfePct: Number(main.mfe.toFixed(2)), maePct: Number(main.mae.toFixed(2)) };
+      if (main.outcome !== 'none') {
+        const hitTp = main.outcome === 'tp';
+        const exit = hitTp ? op.takeProfit1 : op.stopLoss;
+        const pnl = sign * (exit / op.entryPrice - 1) - ROUND_TRIP_COST;
+        next = {
+          ...next,
+          status: hitTp ? 'tp_hit' : 'sl_hit',
+          evaluatedTs: future[main.idx][0],
+          exitPrice: exit,
           realizedPnlPct: Number((pnl * 100).toFixed(2)),
-          mfePct: Number(mfe.toFixed(2)),
-          maePct: Number(mae.toFixed(2)),
+          ...stats,
         };
-        break;
-      }
-      if (hitTp) {
-        const pnl = isLong
-          ? (op.takeProfit1 / op.entryPrice - 1) - ROUND_TRIP_COST
-          : (1 - op.takeProfit1 / op.entryPrice) - ROUND_TRIP_COST;
-        resolved = {
-          ...op,
-          status: 'tp_hit',
-          evaluatedTs: c[0],
-          exitPrice: op.takeProfit1,
-          realizedPnlPct: Number((pnl * 100).toFixed(2)),
-          mfePct: Number(mfe.toFixed(2)),
-          maePct: Number(mae.toFixed(2)),
-        };
-        break;
-      }
-    }
-
-    if (!resolved) {
-      const latestTs = future[future.length - 1][0];
-      const lastClose = future[future.length - 1][4];
-      if (latestTs >= expiryTs - HOUR) {
-        const pnl =
-          (isLong ? lastClose / op.entryPrice - 1 : 1 - lastClose / op.entryPrice) - ROUND_TRIP_COST;
-        resolved = {
-          ...op,
+      } else if (complete) {
+        const lastClose = future[future.length - 1][4];
+        const pnl = sign * (lastClose / op.entryPrice - 1) - ROUND_TRIP_COST;
+        next = {
+          ...next,
           status: 'expired',
-          evaluatedTs: latestTs,
+          evaluatedTs: future[future.length - 1][0],
           exitPrice: roundPx(lastClose, op.entryPrice),
           realizedPnlPct: Number((pnl * 100).toFixed(2)),
-          mfePct: Number(mfe.toFixed(2)),
-          maePct: Number(mae.toFixed(2)),
+          ...stats,
         };
       }
     }
 
-    if (resolved) {
-      all[i] = resolved;
+    if (needsHorizon) {
+      const lastClose = future[future.length - 1][4];
+      const closeRet = sign * (lastClose / op.entryPrice - 1) * 100;
+      const tp2 = scanTpSl(future, isLong, op.entryPrice, op.stopLoss, op.takeProfit2);
+
+      // Operación espejo: dirección contraria con las mismas distancias SL/TP1.
+      const slDist = Math.abs(op.entryPrice - op.stopLoss) / op.entryPrice;
+      const tpDist = Math.abs(op.takeProfit1 - op.entryPrice) / op.entryPrice;
+      const mirrorLong = !isLong;
+      const mSl = op.entryPrice * (mirrorLong ? 1 - slDist : 1 + slDist);
+      const mTp = op.entryPrice * (mirrorLong ? 1 + tpDist : 1 - tpDist);
+      const mirror = scanTpSl(future, mirrorLong, op.entryPrice, mSl, mTp);
+
+      next = {
+        ...next,
+        tp2Hit: tp2.outcome === 'tp',
+        closeRetPct: Number(closeRet.toFixed(2)),
+        dirCorrect: closeRet > 0,
+        mirrorStatus: mirror.outcome === 'tp' ? 'tp_hit' : mirror.outcome === 'sl' ? 'sl_hit' : 'expired',
+        horizonDone: true,
+      };
+    }
+
+    if (JSON.stringify(next) !== JSON.stringify(op)) {
+      all[i] = next;
       changed = true;
     }
   }
@@ -514,23 +509,17 @@ export function evaluateTradeOptionsWithCandles(
 }
 
 function summarizeTradeOptionStats(rows: RegisteredTradeOption[]) {
-  const closed = rows.filter((r) => r.status !== 'open');
-  const tpHit = rows.filter((r) => r.status === 'tp_hit').length;
-  const slHit = rows.filter((r) => r.status === 'sl_hit').length;
-  const expired = rows.filter((r) => r.status === 'expired').length;
-  const decided = tpHit + slHit;
-  const pnls = closed
-    .map((r) => r.realizedPnlPct)
-    .filter((v): v is number => v !== null && Number.isFinite(v));
-
+  const evaluation = buildEvaluation(rows);
+  const o = evaluation.overall;
   return {
-    total: rows.length,
-    open: rows.filter((r) => r.status === 'open').length,
-    tpHit,
-    slHit,
-    expired,
-    winRatePct: decided > 0 ? Number(((tpHit / decided) * 100).toFixed(1)) : null,
-    avgPnlPct: pnls.length > 0 ? Number((pnls.reduce((s, v) => s + v, 0) / pnls.length).toFixed(2)) : null,
+    total: o.n,
+    open: o.open,
+    tpHit: o.tpHit,
+    slHit: o.slHit,
+    expired: o.expired,
+    winRatePct: o.winDecidedPct,
+    avgPnlPct: o.avgPnlPct,
+    evaluation,
   };
 }
 
@@ -539,6 +528,7 @@ export function proposalToRegisteredRecord(
   source: 'auto' | 'manual',
   createdTs: number,
   bucketSuffix?: string,
+  rank?: number,
 ): RegisteredTradeOption {
   const safeId = bucketSuffix ? `${p.asset}_${p.strategyKey}_${bucketSuffix}` : p.id;
   return {
@@ -571,6 +561,7 @@ export function proposalToRegisteredRecord(
     mfePct: null,
     maePct: null,
     summary: p.rationale[0]?.slice(0, 200) ?? `${p.title} (${p.dir})`,
+    ...(rank !== undefined ? { rank } : {}),
   };
 }
 
@@ -1064,18 +1055,14 @@ export async function computeTradeOptions(
         b.confluenceScore * 0.6 + b.probTpPct * 0.4 - (a.confluenceScore * 0.6 + a.probTpPct * 0.4),
     );
 
-    // Auto-register the highest-ranked proposal for this 4h bucket if not yet logged
-    if (autoRecordTop && proposals.length > 0) {
-      const top = proposals[0];
-      const existingAll = loadRegisteredTradeOptions();
-      const hasForBucket = existingAll.some(
-        (r) => r.asset === asset && r.id.endsWith(`_${bucketKey}`),
-      );
-      if (!hasForBucket) {
-        upsertRegisteredTradeOption(
-          proposalToRegisteredRecord(top, 'auto', anchorTs, bucketKey),
-        );
-      }
+    // Guarda TODAS las opciones generadas (las 4 estrategias) una vez por activo, estrategia y tanda de 4 h,
+    // para poder evaluarlas después contra la evolución real del precio.
+    if (autoRecordTop) {
+      const knownIds = new Set(loadRegisteredTradeOptions().map((r) => r.id));
+      proposals.forEach((p, idx) => {
+        const rec = proposalToRegisteredRecord(p, 'auto', anchorTs, bucketKey, idx + 1);
+        if (!knownIds.has(rec.id)) upsertRegisteredTradeOption(rec);
+      });
     }
 
     // Evaluate all open registered options for this asset against latest 1H candles

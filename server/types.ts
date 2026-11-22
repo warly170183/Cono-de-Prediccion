@@ -508,6 +508,60 @@ export interface RegisteredTradeOption {
   mfePct: number | null;
   maePct: number | null;
   summary: string;
+  /** Posición en el ranking de su tanda (1 = la mejor según confluencia y probabilidad). */
+  rank?: number;
+  /** ¿Llegó a TP2 antes que al SL dentro del horizonte? (solo con horizonte completo) */
+  tp2Hit?: boolean | null;
+  /** Retorno bruto (%) al final del horizonte, con signo según la dirección de la operación. */
+  closeRetPct?: number | null;
+  /** ¿El precio terminó el horizonte en la dirección prevista? */
+  dirCorrect?: boolean | null;
+  /** Resultado de la operación espejo (dirección contraria, mismas distancias SL/TP): control de azar. */
+  mirrorStatus?: 'tp_hit' | 'sl_hit' | 'expired' | null;
+  /** true cuando ya se evaluó el horizonte completo. */
+  horizonDone?: boolean;
+}
+
+export interface TradeOptionGroupStats {
+  key: string;
+  label: string;
+  /** Opciones guardadas en el grupo (incluye abiertas). */
+  n: number;
+  open: number;
+  tpHit: number;
+  slHit: number;
+  expired: number;
+  /** TP1 sobre todas las cerradas por el sistema (TP + SL + expiradas). */
+  tpRatePct: number | null;
+  /** TP1 sobre las decididas (TP + SL). */
+  winDecidedPct: number | null;
+  /** Probabilidad media de TP que predijo la app para esas mismas opciones. */
+  predProbTpPct: number | null;
+  /** Tasa de acierto mínima (entre decididas) para no perder dinero con esas distancias SL/TP y costes. */
+  breakevenPct: number | null;
+  /** Tasa de TP de la operación espejo (control de azar). */
+  mirrorTpRatePct: number | null;
+  /** Dirección acertada al final del horizonte: todas las evaluadas (se solapan en el tiempo). */
+  dirN: number;
+  dirAccPct: number | null;
+  /** Misma métrica con opciones sin solape temporal por activo+estrategia (la que cuenta para concluir). */
+  dirIndepN: number;
+  dirIndepAccPct: number | null;
+  dirCi95: [number, number] | null;
+  dirPValue: number | null;
+  avgPnlPct: number | null;
+  avgCloseRetPct: number | null;
+}
+
+export interface TradeOptionEvaluation {
+  overall: TradeOptionGroupStats;
+  byStrategy: TradeOptionGroupStats[];
+  byDir: TradeOptionGroupStats[];
+  byConfidence: TradeOptionGroupStats[];
+  byAsset: TradeOptionGroupStats[];
+  byRank: TradeOptionGroupStats[];
+  verdict: { level: 'insufficient' | 'no_edge' | 'edge' | 'worse'; text: string };
+  minIndependent: number;
 }
 
 export interface TradeOptionsResponse {
@@ -543,6 +597,7 @@ export interface TradeOptionsResponse {
     expired: number;
     winRatePct: number | null;
     avgPnlPct: number | null;
+    evaluation: TradeOptionEvaluation;
   };
 }
 

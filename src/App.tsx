@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LogOut, Moon, RefreshCw, Sun, UserCheck } from 'lucide-react';
+import { Moon, RefreshCw, Sun } from 'lucide-react';
 import type {
   AssetId,
   AutoJournalStatus,
@@ -14,16 +14,7 @@ import type {
   TradeOptionProposal,
   TradeOptionsResponse,
 } from './types.ts';
-import { useAuth } from './lib/AuthContext.tsx';
-import {
-  deleteCloudTradeOption,
-  saveCloudPrediction,
-  saveCloudTradeOption,
-  subscribeCloudPredictions,
-  subscribeCloudTradeOptions,
-  type CloudPredictionItem,
-  type PredictionRecord,
-} from './lib/firebase.ts';
+type PredictionRecord = JournalAssetData['predictions'][number];
 import { ConeView } from './components/ConeView.tsx';
 import { GexDerivativesView } from './components/GexDerivativesView.tsx';
 import { TradeGridView } from './components/TradeGridView.tsx';
@@ -52,7 +43,6 @@ const ASSETS: Array<{ id: AssetId; label: string }> = [
 ];
 
 export default function App() {
-  const { user, authReady, authBusy, signInWithGoogle, signOutUser } = useAuth();
   const [tab, setTab] = useState<NavTab>('cone');
   const [asset, setAsset] = useState<AssetId>('btc');
   const [dark, setDark] = useState(true);
@@ -63,12 +53,6 @@ export default function App() {
   const [rotation, setRotation] = useState<RotationResponse | null>(null);
   const [journal, setJournal] = useState<JournalAssetData[]>([]);
   const [autoJournal, setAutoJournal] = useState<AutoJournalStatus | null>(null);
-  const [cloudPreds, setCloudPreds] = useState<CloudPredictionItem[]>([]);
-  const [cloudPredsReady, setCloudPredsReady] = useState(false);
-  const syncedKeysRef = useRef<Set<string>>(new Set());
-  const [cloudTradeOptions, setCloudTradeOptions] = useState<RegisteredTradeOption[]>([]);
-  const [cloudOptionsReady, setCloudOptionsReady] = useState(false);
-  const syncedOptionsRef = useRef<Set<string>>(new Set());
   const [results, setResults] = useState<ResultsResponse | null>(null);
   const [showRadar, setShowRadar] = useState(false);
   const [radarItems, setRadarItems] = useState<RadarAssetItem[]>([]);
@@ -83,52 +67,7 @@ export default function App() {
   const [runningSnapshot, setRunningSnapshot] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!authReady || !user) {
-      setCloudPreds([]);
-      setCloudPredsReady(false);
-      syncedKeysRef.current.clear();
-      setCloudTradeOptions([]);
-      setCloudOptionsReady(false);
-      syncedOptionsRef.current.clear();
-      return;
-    }
-    const unsubPreds = subscribeCloudPredictions(
-      user.uid,
-      (items) => {
-        setCloudPreds(items);
-        setCloudPredsReady(true);
-      },
-      (err) => console.error('Cloud predictions subscription error:', err),
-    );
-    const unsubOptions = subscribeCloudTradeOptions(
-      user.uid,
-      (items) => {
-        setCloudTradeOptions(items);
-        setCloudOptionsReady(true);
-      },
-      (err) => console.error('Cloud trade options subscription error:', err),
-    );
-    return () => {
-      unsubPreds();
-      unsubOptions();
-    };
-  }, [authReady, user]);
-
-  const mergedJournal = useMemo(() => {
-    if (!cloudPreds.length) return journal;
-    return journal.map((item) => {
-      const extras = cloudPreds.filter((c) => c.asset === item.asset).map((c) => c.record);
-      if (!extras.length) return item;
-      const byId = new Map<string, PredictionRecord>();
-      for (const p of item.predictions) byId.set(p.id, p);
-      for (const p of extras) {
-        if (!byId.has(p.id)) byId.set(p.id, p);
-      }
-      const predictions = Array.from(byId.values()).sort((a, b) => a.anchor_ts - b.anchor_ts);
-      return { ...item, predictions };
-    });
-  }, [journal, cloudPreds]);
+  const mergedJournal = journal;
 
   useEffect(() => {
     const root = document.documentElement;
@@ -284,134 +223,6 @@ export default function App() {
     };
   }, [fetchJournalAndResults]);
 
-  // Automatic Firestore backup when user is authenticated and cloud snapshot loaded
-  useEffect(() => {
-    if (!authReady || !user || !cloudPredsReady || journal.length === 0) return;
-
-    const cloudAnchors = new Map<string, number>();
-    for (const c of cloudPreds) {
-      cloudAnchors.set(`${c.asset}:${c.record.id}`, c.record.anchor_ts);
-    }
-
-    const pending: Array<{ asset: AssetId; rec: PredictionRecord; key: string }> = [];
-    for (const item of journal) {
-      for (const rec of item.predictions) {
-        const key = `${user.uid}:${item.asset}:${rec.id}:${rec.anchor_ts}`;
-        if (cloudAnchors.get(`${item.asset}:${rec.id}`) === rec.anchor_ts) {
-          syncedKeysRef.current.add(key);
-          continue;
-        }
-        if (!syncedKeysRef.current.has(key)) {
-          syncedKeysRef.current.add(key);
-          pending.push({ asset: item.asset, rec, key });
-        }
-      }
-    }
-
-    if (pending.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      for (const task of pending) {
-        if (cancelled) break;
-        try {
-          await saveCloudPrediction(user.uid, task.asset, task.rec);
-        } catch (err) {
-          syncedKeysRef.current.delete(task.key);
-          console.warn(`Auto-sync Firestore failed for ${task.asset} ${task.rec.id}:`, err);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authReady, user, cloudPredsReady, cloudPreds, journal]);
-
-  // Rehidrata el disco del servidor desde Firestore (p. ej. tras un redeploy con disco efímero):
-  // envía solo lo que existe en la nube y falta en el servidor. El servidor nunca sobrescribe.
-  const restoredForUidRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!authReady || !user || !cloudPredsReady || !cloudOptionsReady) return;
-    if (!journal.length || !tradeOptions) return;
-    if (restoredForUidRef.current === user.uid) return;
-
-    const serverIds = new Set<string>();
-    for (const item of journal) for (const p of item.predictions) serverIds.add(`${item.asset}:${p.id}`);
-    const missingPreds: Record<string, PredictionRecord[]> = { btc: [], eth: [], sol: [] };
-    for (const c of cloudPreds) {
-      if (!serverIds.has(`${c.asset}:${c.record.id}`)) missingPreds[c.asset].push(c.record);
-    }
-    const serverOpts = new Map((tradeOptions.registered ?? []).map((o) => [o.id, o.status]));
-    const missingOpts = cloudTradeOptions.filter((o) => {
-      const st = serverOpts.get(o.id);
-      return st === undefined || (st === 'open' && o.status !== 'open');
-    });
-
-    restoredForUidRef.current = user.uid;
-    const total = Object.values(missingPreds).reduce((n, l) => n + l.length, 0) + missingOpts.length;
-    if (total === 0) return;
-    void (async () => {
-      try {
-        const res = await fetch('/api/journal/restore', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ predictions: missingPreds, tradeOptions: missingOpts }),
-        });
-        if (res.ok) {
-          await fetchJournalAndResults({ silent: true });
-          await fetchTradeOptions(asset);
-        } else {
-          restoredForUidRef.current = null;
-        }
-      } catch (err) {
-        restoredForUidRef.current = null;
-        console.warn('Restauración desde Firestore fallida:', err);
-      }
-    })();
-  }, [authReady, user, cloudPredsReady, cloudOptionsReady, cloudPreds, cloudTradeOptions, journal, tradeOptions, asset, fetchJournalAndResults, fetchTradeOptions]);
-
-  // Automatic Firestore backup for registered Trade Options (respecting terminal state lock)
-  useEffect(() => {
-    if (!authReady || !user || !cloudOptionsReady || !tradeOptions?.registered?.length) return;
-
-    const cloudStatusMap = new Map<string, RegisteredTradeOption['status']>();
-    for (const c of cloudTradeOptions) {
-      cloudStatusMap.set(c.id, c.status);
-    }
-
-    const pending: Array<{ op: RegisteredTradeOption; key: string }> = [];
-    for (const op of tradeOptions.registered) {
-      const key = `${user.uid}:${op.id}:${op.status}`;
-      const existingStatus = cloudStatusMap.get(op.id);
-      if (existingStatus === op.status || (existingStatus && existingStatus !== 'open')) {
-        syncedOptionsRef.current.add(key);
-        continue;
-      }
-      if (!syncedOptionsRef.current.has(key)) {
-        syncedOptionsRef.current.add(key);
-        pending.push({ op, key });
-      }
-    }
-
-    if (pending.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      for (const task of pending) {
-        if (cancelled) break;
-        try {
-          await saveCloudTradeOption(user.uid, task.op);
-        } catch (err) {
-          syncedOptionsRef.current.delete(task.key);
-          console.warn(`Auto-sync Firestore failed for trade option ${task.op.id}:`, err);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authReady, user, cloudOptionsReady, cloudTradeOptions, tradeOptions]);
-
   const handleRegisterTradeOption = useCallback(
     async (proposal: TradeOptionProposal) => {
       setRegisteringOptionKey(proposal.strategyKey);
@@ -433,17 +244,13 @@ export default function App() {
           options?: TradeOptionsResponse;
         };
         if (json.options) setTradeOptions(json.options);
-        if (user && json.saved) {
-          syncedOptionsRef.current.add(`${user.uid}:${json.saved.id}:${json.saved.status}`);
-          await saveCloudTradeOption(user.uid, json.saved);
-        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'No se pudo registrar la operación');
       } finally {
         setRegisteringOptionKey(null);
       }
     },
-    [user],
+    [],
   );
 
   const handleCloseTradeOptionManual = useCallback(
@@ -469,16 +276,12 @@ export default function App() {
                 }
               : prev,
           );
-          if (user) {
-            syncedOptionsRef.current.add(`${user.uid}:${updated.id}:${updated.status}`);
-            await saveCloudTradeOption(user.uid, updated);
-          }
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Error cerrando operación');
       }
     },
-    [asset, user],
+    [asset],
   );
 
   const handleDeleteTradeOption = useCallback(
@@ -498,14 +301,11 @@ export default function App() {
               }
             : prev,
         );
-        if (user) {
-          await deleteCloudTradeOption(user.uid, optionId);
-        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Error eliminando registro');
       }
     },
-    [user],
+    [],
   );
 
   const handleToggleAutoJournal = useCallback(
@@ -548,15 +348,6 @@ export default function App() {
         auto?: AutoJournalStatus;
       };
       if (resJson.auto) setAutoJournal(resJson.auto);
-      if (user && resJson.saved?.length) {
-        await Promise.all(
-          resJson.saved.map((rec, idx) => {
-            const targetAsset = rec.asset ?? assetsToRun[idx] ?? asset;
-            syncedKeysRef.current.add(`${user.uid}:${targetAsset}:${rec.id}:${rec.anchor_ts}`);
-            return saveCloudPrediction(user.uid, targetAsset, rec);
-          }),
-        );
-      }
       await Promise.all([fetchJournalAndResults(), fetchOverview(asset, true)]);
       setTab('journal');
     } catch (e) {
@@ -609,28 +400,6 @@ export default function App() {
               {runningSnapshot ? 'Guardando…' : 'Guardar lectura'}
             </button>
 
-            {user ? (
-              <button
-                type="button"
-                onClick={() => void signOutUser()}
-                disabled={authBusy}
-                title={user.email ?? 'Cerrar sesión'}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <UserCheck className="w-3.5 h-3.5 text-emerald-500" />
-                <span className="hidden sm:inline">{user.displayName?.split(' ')[0] || 'Cuenta'}</span>
-                <LogOut className="w-3 h-3 text-slate-400" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void signInWithGoogle()}
-                disabled={authBusy}
-                className="px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                {authBusy ? 'Conectando…' : 'Sincronizar nube'}
-              </button>
-            )}
           </div>
         </div>
 
@@ -802,7 +571,6 @@ export default function App() {
           <TradeOptionsView
             asset={asset}
             data={tradeOptions}
-            cloudOptions={cloudTradeOptions}
             loading={loadingTradeOptions}
             registeringKey={registeringOptionKey}
             onRefresh={() => void fetchTradeOptions(asset, true)}
@@ -844,7 +612,6 @@ export default function App() {
         {tab === 'architecture' && (
           <ArchitectureView
             asset={asset}
-            isAuthenticated={Boolean(user)}
             onNavigateTab={(nextTab) => setTab(nextTab)}
           />
         )}

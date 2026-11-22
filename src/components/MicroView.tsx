@@ -1,40 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
 import type { AssetId, CollectorStatus, MicroLiveResponse, MicroStudyResponse } from '../types.ts';
-import { useAuth } from '../lib/AuthContext.tsx';
-import {
-  saveMicroBarCloud,
-  subscribeMicroBars,
-  type CloudMicroBar,
-} from '../lib/firebase.ts';
 
 interface Props {
   asset: AssetId;
 }
 
 export const MicroView: React.FC<Props> = ({ asset }) => {
-  const { user, authReady } = useAuth();
   const [live, setLive] = useState<MicroLiveResponse | null>(null);
   const [study, setStudy] = useState<MicroStudyResponse | null>(null);
   const [collector, setCollector] = useState<CollectorStatus | null>(null);
-  const [cloudBars, setCloudBars] = useState<CloudMicroBar[]>([]);
   const [collectorBusy, setCollectorBusy] = useState(false);
   const [autoCapture, setAutoCapture] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!authReady || !user) {
-      setCloudBars([]);
-      return;
-    }
-    const unsub = subscribeMicroBars(
-      user.uid,
-      (items) => setCloudBars(items),
-      (err) => console.error('Cloud microBars error:', err),
-    );
-    return () => unsub();
-  }, [authReady, user]);
 
   const loadData = async (record = false) => {
     try {
@@ -47,11 +26,6 @@ export const MicroView: React.FC<Props> = ({ asset }) => {
       if (!liveRes.ok) throw new Error('Error cargando libro de órdenes OKX');
       const liveJson = (await liveRes.json()) as MicroLiveResponse;
       setLive(liveJson);
-      if (record && user) {
-        void saveMicroBarCloud(user.uid, asset, liveJson.inst, liveJson.tick).catch((e) => {
-          console.error('Error saving cloud micro bar:', e);
-        });
-      }
       if (studyRes.ok) {
         const studyJson = (await studyRes.json()) as MicroStudyResponse;
         setStudy(studyJson);
@@ -458,43 +432,6 @@ export const MicroView: React.FC<Props> = ({ asset }) => {
             </div>
           )}
 
-          {user && cloudBars.length > 0 && (
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
-              <div className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
-                Capturas guardadas en tu nube ({cloudBars.length})
-              </div>
-              <div className="overflow-x-auto max-h-48">
-                <table className="w-full text-xs font-mono tabular-nums">
-                  <thead>
-                    <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
-                      <th className="py-1.5 text-left font-sans font-medium">Hora</th>
-                      <th className="py-1.5 text-left font-sans font-medium">Contrato</th>
-                      <th className="py-1.5 text-right font-medium">Mid</th>
-                      <th className="py-1.5 text-right font-medium">Spread (bps)</th>
-                      <th className="py-1.5 text-right font-medium">Imb 5</th>
-                      <th className="py-1.5 text-right font-medium">Taker B / S</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                    {cloudBars.slice(0, 15).map((b) => (
-                      <tr key={b.id}>
-                        <td className="py-1.5 text-slate-500 dark:text-slate-400">
-                          {new Date(b.ts).toLocaleString('es-ES')}
-                        </td>
-                        <td className="py-1.5 font-sans">{b.inst}</td>
-                        <td className="py-1.5 text-right">${b.mid.toLocaleString('en-US')}</td>
-                        <td className="py-1.5 text-right">{b.spreadBps.toFixed(3)}</td>
-                        <td className="py-1.5 text-right">{b.imb5 !== undefined && b.imb5 !== null ? b.imb5.toFixed(3) : '—'}</td>
-                        <td className="py-1.5 text-right">
-                          {b.tkBuyBtc.toFixed(2)} / {b.tkSellBtc.toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>

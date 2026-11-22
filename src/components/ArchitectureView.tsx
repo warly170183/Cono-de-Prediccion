@@ -4,7 +4,6 @@ import type { AssetId, NavTab } from '../types.ts';
 
 interface Props {
   asset: AssetId;
-  isAuthenticated: boolean;
   onNavigateTab: (tab: NavTab) => void;
 }
 
@@ -63,7 +62,7 @@ const FLOW_SCENARIOS: Array<{ id: FlowScenarioId; label: string; description: st
     id: 'journal_cloud',
     label: 'Diario Automático & Nube',
     description:
-      'El programador interno ejecuta capturas diarias cada 30 min para BTC/ETH/SOL, evalúa cobertura real a 24 h / 72 h contra OKX y sincroniza registros autenticados con Cloud Firestore.',
+      'El programador interno ejecuta capturas diarias cada 30 min para BTC/ETH/SOL, evalúa cobertura real a 24 h / 72 h contra OKX y guarda todo en ficheros locales.',
   },
   {
     id: 'micro_l2',
@@ -236,32 +235,6 @@ const NODES: ArchNode[] = [
     targetTab: 'journal',
     targetLabel: 'Ir a Diario',
   },
-  {
-    id: 'firebase_cloud',
-    layer: 'Persistencia & Cron',
-    col: 2,
-    x: 584,
-    y: 266,
-    w: 224,
-    h: 132,
-    title: 'Firebase Auth & Cloud Firestore',
-    subtitle: 'Respaldo multi-sesión y bloqueo terminal',
-    accent: 'emerald',
-    summary:
-      'Sincroniza automáticamente las lecturas del diario, presets What-If, barras L2 y operaciones registradas bajo /users/{uid}/ con validación estricta en firestore.rules.',
-    inputs: ['Cuenta Google autenticada', 'Registros locales pendientes de respaldo'],
-    outputs: ['Suscripciones en tiempo real (onSnapshot)', 'Historial persistente entre sesiones'],
-    endpoints: [
-      '/users/{uid}/predictions',
-      '/users/{uid}/tradeOptions',
-      '/users/{uid}/tradePresets',
-      '/users/{uid}/microBars',
-    ],
-    details: [
-      'Aislamiento estricto por propietario (isOwner(userId)) y verificación de email.',
-      'Bloqueo de estado terminal en reglas: una operación cerrada (tp_hit, sl_hit, closed_manual) no puede reabrirse ni alterar su precio de entrada.',
-    ],
-  },
 
   // Col 3: Frontend SPA Views
   {
@@ -300,12 +273,12 @@ const NODES: ArchNode[] = [
     accent: 'emerald',
     summary:
       'Integra la matriz de esperanza matemática (EV/Kelly), simulador interactivo SL/TP, visualización de Sesgo del Mercado (GEX Positivo vs Negativo) y registro auditable de operaciones.',
-    inputs: ['/api/trades', '/api/trades/simulate', '/api/trade-options', 'Cloud Firestore'],
+    inputs: ['/api/trades', '/api/trades/simulate', '/api/trade-options'],
     outputs: ['Filtros Gamma Flip / En Tendencia', 'Registro manual y cierre de operaciones'],
     endpoints: ['Vista: Rejilla EV', 'Vista: Opciones de Trading'],
     details: [
       'Desglose expandible de los 8 factores de confluencia evaluados en cada propuesta.',
-      'Sincronización automática bidireccional entre el estado local del servidor y Firestore.',
+      'Cada opción generada se guarda en local y se evalúa contra el precio posterior (TP1/TP2/SL y dirección al horizonte).',
     ],
     targetTab: 'trade_options',
     targetLabel: 'Ir a Opciones de Trading',
@@ -399,13 +372,6 @@ const EDGES: ArchEdge[] = [
     scenarios: ['all', 'micro_l2'],
   },
   {
-    id: 'e_journal_cloud',
-    from: 'schedulers_jsonl',
-    to: 'firebase_cloud',
-    label: 'Respaldo autenticado',
-    scenarios: ['all', 'trade_options', 'journal_cloud', 'micro_l2'],
-  },
-  {
     id: 'e_quant_ui',
     from: 'quant_engine',
     to: 'ui_quant',
@@ -420,25 +386,11 @@ const EDGES: ArchEdge[] = [
     scenarios: ['all', 'trade_options'],
   },
   {
-    id: 'e_cloud_ui_trading',
-    from: 'firebase_cloud',
-    to: 'ui_trading',
-    label: 'Sync Presets y Opciones',
-    scenarios: ['all', 'trade_options'],
-  },
-  {
     id: 'e_journal_ui_audit',
     from: 'schedulers_jsonl',
     to: 'ui_audit',
     label: 'Diario + Estudio IC',
     scenarios: ['all', 'journal_cloud', 'micro_l2'],
-  },
-  {
-    id: 'e_cloud_ui_audit',
-    from: 'firebase_cloud',
-    to: 'ui_audit',
-    label: 'Predicciones nube',
-    scenarios: ['all', 'journal_cloud'],
   },
   {
     id: 'e_batch_ui_audit',
@@ -576,7 +528,7 @@ function buildCurvePath(from: ArchNode, to: ArchNode): { d: string; midX: number
   return { d, midX: (x1 + x2) / 2, midY: (y1 + y2) / 2 };
 }
 
-export const ArchitectureView: React.FC<Props> = ({ asset, isAuthenticated, onNavigateTab }) => {
+export const ArchitectureView: React.FC<Props> = ({ asset, onNavigateTab }) => {
   const [scenario, setScenario] = useState<FlowScenarioId>('all');
   const [selectedNodeId, setSelectedNodeId] = useState<string>('trade_options_svc');
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -693,12 +645,12 @@ export const ArchitectureView: React.FC<Props> = ({ asset, isAuthenticated, onNa
         </div>
 
         <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-500 dark:text-slate-400">Capa 3 · Persistencia Híbrida</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">Capa 3 · Persistencia local</div>
           <div className="mt-1.5 text-lg font-display font-semibold text-slate-900 dark:text-slate-50">
-            JSONL Local + Firestore
+            JSONL Local
           </div>
           <div className="mt-1 text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
-            {isAuthenticated ? 'Nube conectada (Auth activo)' : 'Modo local (Auth opcional)'}
+            Carpeta journal/ (configurable con JOURNAL_DIR)
           </div>
         </div>
 
@@ -1158,7 +1110,7 @@ export const ArchitectureView: React.FC<Props> = ({ asset, isAuthenticated, onNa
 
         <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-5 space-y-3">
           <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-slate-50">
-            Persistencia Híbrida: Local (JSONL) + Cloud Firestore
+            Persistencia local (JSONL)
           </h3>
           <div className="divide-y divide-slate-100 dark:divide-slate-800/70 text-xs">
             <div className="py-2.5 space-y-1">
@@ -1167,22 +1119,6 @@ export const ArchitectureView: React.FC<Props> = ({ asset, isAuthenticated, onNa
               </div>
               <p className="text-slate-600 dark:text-slate-300">
                 Los programadores automáticos guardan predicciones diarias, barras L2 y operaciones registradas en disco para garantizar continuidad inmediata y exportación directa en CSV/JSONL.
-              </p>
-            </div>
-            <div className="py-2.5 space-y-1">
-              <div className="font-semibold text-slate-800 dark:text-slate-200">
-                Sincronización privada en Firebase
-              </div>
-              <p className="text-slate-600 dark:text-slate-300">
-                Al iniciar sesión con Google, el cliente sincroniza automáticamente las colecciones <span className="font-mono">predictions</span>, <span className="font-mono">tradeOptions</span>, <span className="font-mono">tradePresets</span> y <span className="font-mono">microBars</span> bajo el UID verificado del usuario.
-              </p>
-            </div>
-            <div className="py-2.5 space-y-1">
-              <div className="font-semibold text-slate-800 dark:text-slate-200">
-                Reglas con Bloqueo de Estado Terminal
-              </div>
-              <p className="text-slate-600 dark:text-slate-300">
-                Las reglas de Firestore impiden modificar registros cerrados (<span className="font-mono">tp_hit</span>, <span className="font-mono">sl_hit</span>, <span className="font-mono">closed_manual</span>) o alterar precios de entrada retrospectivamente, preservando la integridad de la auditoría.
               </p>
             </div>
           </div>

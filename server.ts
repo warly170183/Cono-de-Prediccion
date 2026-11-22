@@ -28,7 +28,6 @@ import {
   exportJournalData,
   getAutoJournalStatus,
   loadJournalPredictions,
-  restoreJournalPredictions,
   runLivePredictionSnapshot,
   scorePredictions,
   setAutoJournalEnabled,
@@ -46,7 +45,6 @@ import {
   stopMicroCollector,
 } from './server/microService.ts';
 import { getRotationAnalysis } from './server/rotationService.ts';
-import { optionalAuth, requireAuth } from './server/auth.ts';
 import {
   closeRegisteredTradeOptionManual,
   computeTradeOptions,
@@ -54,7 +52,6 @@ import {
   ensureAutoTradeOptionsForAllAssets,
   loadRegisteredTradeOptions,
   proposalToRegisteredRecord,
-  restoreRegisteredTradeOptions,
   upsertRegisteredTradeOption,
 } from './server/tradeOptionsService.ts';
 
@@ -139,19 +136,7 @@ async function computeAssetOverview(asset: AssetId, refresh = false) {
 
 async function startServer() {
   const app = express();
-  // La restauración desde Firestore puede pesar varios MB: parser propio, antes del global.
-  app.use('/api/journal/restore', express.json({ limit: '10mb' }));
   app.use(express.json());
-  app.use('/api', optionalAuth);
-  // Escrituras que modifican estado del servidor: exigen sesión Firebase.
-  // (/api/trades/simulate es cálculo puro y queda abierto.)
-  app.post('/api/trade-options/register', requireAuth);
-  app.patch('/api/trade-options/:id', requireAuth);
-  app.delete('/api/trade-options/:id', requireAuth);
-  app.post('/api/journal/auto', requireAuth);
-  app.post('/api/journal/run', requireAuth);
-  app.post('/api/journal/restore', requireAuth);
-  app.post('/api/micro/collector', requireAuth);
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, ts: Date.now() });
@@ -324,6 +309,37 @@ async function startServer() {
     }
   });
 
+  // Exportación de todas las opciones guardadas con su evaluación (copia de seguridad / análisis externo).
+  app.get('/api/trade-options/export', (req, res) => {
+    try {
+      const rows = loadRegisteredTradeOptions();
+      if (String(req.query.format ?? 'csv') === 'jsonl') {
+        res.setHeader('Content-Type', 'application/x-ndjson');
+        res.setHeader('Content-Disposition', 'attachment; filename="trade_options.jsonl"');
+        res.send(rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+        return;
+      }
+      const cols = [
+        'id', 'asset', 'strategyKey', 'rank', 'dir', 'horizonHours', 'createdIso', 'entryPrice', 'stopLoss',
+        'takeProfit1', 'takeProfit2', 'rr', 'probTpPct', 'evPct', 'confluenceScore', 'confidence', 'status',
+        'exitPrice', 'realizedPnlPct', 'mfePct', 'maePct', 'tp2Hit', 'closeRetPct', 'dirCorrect', 'mirrorStatus',
+        'horizonDone', 'source',
+      ] as const;
+      const esc = (v: unknown) => {
+        const t = v === null || v === undefined ? '' : String(v);
+        return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+      };
+      const lines = [cols.join(',')];
+      for (const r of rows) lines.push(cols.map((c) => esc((r as unknown as Record<string, unknown>)[c])).join(','));
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="trade_options.csv"');
+      res.send(lines.join('\n') + '\n');
+    } catch (err) {
+      console.error('Trade options export error:', err);
+      res.status(500).json({ error: 'Export failed' });
+    }
+  });
+
   app.post('/api/trade-options/register', async (req, res) => {
     try {
       const asset = parseAsset(req.body?.asset);
@@ -429,24 +445,6 @@ async function startServer() {
     } catch (err) {
       console.error('Journal auto config error:', err);
       res.status(500).json({ error: 'Auto journal config failed' });
-    }
-  });
-
-  // Rehidrata el disco del servidor desde la copia de Firestore (tras un redeploy con disco efímero).
-  app.post('/api/journal/restore', (req, res) => {
-    try {
-      const preds = (req.body?.predictions ?? {}) as Record<string, unknown>;
-      const restored: Record<string, number> = {};
-      for (const a of VALID_ASSETS) {
-        const list = preds[a];
-        restored[a] = Array.isArray(list) ? restoreJournalPredictions(a, list) : 0;
-      }
-      const opts = Array.isArray(req.body?.tradeOptions) ? req.body.tradeOptions : [];
-      const tradeOptions = restoreRegisteredTradeOptions(opts);
-      res.json({ restored, tradeOptions });
-    } catch (err) {
-      console.error('Journal restore error:', err);
-      res.status(500).json({ error: 'Failed to restore journal' });
     }
   });
 
