@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowRight, Layers, RefreshCw } from 'lucide-react';
 import type { AssetId, NavTab } from '../types.ts';
+import { DataStatusBar } from './DataStatusBar.tsx';
 
 interface Props {
   asset: AssetId;
@@ -44,7 +45,7 @@ const FLOW_SCENARIOS: Array<{ id: FlowScenarioId; label: string; description: st
     id: 'all',
     label: 'Flujo Completo',
     description:
-      'Vista integral de extremo a extremo: APIs públicas de mercado, motores cuantitativos en Express, persistencia híbrida local/nube y vistas interactivas en React 19.',
+      'Vista integral de extremo a extremo: APIs públicas de mercado, motores cuantitativos en Express, persistencia local y vistas interactivas en React 19.',
   },
   {
     id: 'cone_gex',
@@ -56,11 +57,11 @@ const FLOW_SCENARIOS: Array<{ id: FlowScenarioId; label: string; description: st
     id: 'trade_options',
     label: 'Opciones de Trading',
     description:
-      'Combina indicadores técnicos (EMA, RSI, MACD, ADX, VWAP, ATR, Pivotes) con el desequilibrio GEX Positivo/Negativo y 4,000 rutas Monte Carlo; registra y audita operaciones cada 4 h.',
+      'Cada estrategia propone solo si cumple sus condiciones (con filtro de tendencia diaria y SL/TP por estructura). Su historial se mide con un backtest de las mismas reglas y con las operaciones reales; cada opción se registra y se evalúa contra el precio posterior.',
   },
   {
     id: 'journal_cloud',
-    label: 'Diario Automático & Nube',
+    label: 'Diario & Datos Locales',
     description:
       'El programador interno ejecuta capturas diarias cada 30 min para BTC/ETH/SOL, evalúa cobertura real a 24 h / 72 h contra OKX y guarda todo en ficheros locales.',
   },
@@ -126,7 +127,7 @@ const NODES: ArchNode[] = [
     x: 298,
     y: 44,
     w: 236,
-    h: 92,
+    h: 84,
     title: 'Conector & Caché TTL',
     subtitle: 'Control de concurrencia y reintentos',
     accent: 'sky',
@@ -145,9 +146,9 @@ const NODES: ArchNode[] = [
     layer: 'Servicios & Motor',
     col: 1,
     x: 298,
-    y: 158,
+    y: 142,
     w: 236,
-    h: 112,
+    h: 104,
     title: 'Motor Cuantitativo GARCH & GEX',
     subtitle: 'GJR-GARCH, SVI, GMM, EV/Kelly',
     accent: 'emerald',
@@ -169,20 +170,44 @@ const NODES: ArchNode[] = [
     layer: 'Servicios & Motor',
     col: 1,
     x: 298,
-    y: 292,
+    y: 260,
     w: 236,
     h: 92,
     title: 'Motor Opciones de Trading',
-    subtitle: 'Técnicos + Sesgo GEX + 4,000 rutas',
+    subtitle: 'Técnicos + GEX + confluencia + calidad',
     accent: 'amber',
     summary:
-      'Calcula 12+ indicadores técnicos sobre OKX, los cruza con el desequilibrio GEX Positivo/Negativo y simula 4 estrategias parametrizadas para clasificarlas por confluencia y P(TP).',
-    inputs: ['EMA 20/50/200, RSI, MACD, ADX, ATR, BB, VWAP, OBV, Pivotes', 'GEX Net Diff & Gamma Flip'],
-    outputs: ['4 propuestas rankeadas', 'Etiquetas de régimen (Gamma Flip / En Tendencia)'],
+      'Calcula 12+ indicadores técnicos, aplica el detector de setups y puntúa cada propuesta: calidad = setup + confluencia de 9 factores (incluida la tendencia diaria) + historial medido de la estrategia.',
+    inputs: ['EMA 20/50/200, RSI, MACD, ADX, ATR, BB, VWAP, OBV, Pivotes', 'GEX, funding, L/S, OI', 'Setups y veredicto del backtest'],
+    outputs: ['Solo propuestas con condiciones cumplidas', 'Calidad 0-100, ★ recomendada y riesgo ¼ Kelly'],
     endpoints: ['/api/trade-options', '/api/trade-options/register', '/api/trade-options/:id'],
     details: [
-      'Evalúa 4,000 trayectorias Monte Carlo condicionadas para estimar P(TP), P(SL), Timeout, EV y Kelly.',
-      'Clasifica el régimen activo en Gamma Flip, En Tendencia (ADX ≥ 20) o Equilibrado.',
+      '4,000 trayectorias GARCH siguen estimando P(TP), P(SL) y EV, pero con deriva neutra: es solo geometría SL/TP + costes, no ventaja direccional.',
+      'El riesgo sugerido sale de la esperanza MEDIDA (backtest + reales), y es mínimo mientras la estrategia no tenga ventaja validada.',
+    ],
+    targetTab: 'trade_options',
+    targetLabel: 'Ir a Opciones de Trading',
+  },
+  {
+    id: 'signals_backtest',
+    layer: 'Servicios & Motor',
+    col: 1,
+    x: 298,
+    y: 366,
+    w: 236,
+    h: 92,
+    title: 'Detector de Setups & Backtest',
+    subtitle: 'Condiciones de entrada + veredicto por estrategia',
+    accent: 'emerald',
+    summary:
+      'Módulo puro, usado igual en vivo y en el histórico. Cada estrategia entra solo si cumple sus condiciones y, si no, explica por qué no opera. Repite las mismas reglas sobre ~160 días y mide la esperanza en R.',
+    inputs: ['Velas 1H (hasta 4,000) y 1D (320)', 'Funding, L/S, OI y muros GEX (solo en vivo)'],
+    outputs: ['Setups con SL tras swing y TP limitado por niveles', 'Veredicto: validada / prometedora / dudosa / descartada / sin datos'],
+    endpoints: ['/api/trade-options (campos skipped y strategyTracks)'],
+    details: [
+      'Filtro de tendencia diaria: no se opera contra ella sin un extremo claro. Distancias medidas en rango diario.',
+      'Backtest sin ajustar parámetros, operaciones sin solape, SL primero si coinciden en la misma vela, coste de 0,07 % incluido. Se recalcula cada 3 h por activo.',
+      'La estrategia de derivados no es reproducible en histórico (no hay funding/OI a 1 h) y se mide solo con operaciones en vivo.',
     ],
     targetTab: 'trade_options',
     targetLabel: 'Ir a Opciones de Trading',
@@ -192,7 +217,7 @@ const NODES: ArchNode[] = [
     layer: 'Servicios & Motor',
     col: 1,
     x: 298,
-    y: 404,
+    y: 472,
     w: 236,
     h: 64,
     title: 'Rotación 40 & Microestructura',
@@ -217,23 +242,70 @@ const NODES: ArchNode[] = [
     layer: 'Persistencia & Cron',
     col: 2,
     x: 584,
-    y: 86,
+    y: 60,
     w: 224,
     h: 132,
     title: 'Programadores & Diario Local',
-    subtitle: 'JSONL/CSV en servidor + Auto-evaluación',
+    subtitle: 'Registro automático cada 4 h + Diario diario',
     accent: 'amber',
     summary:
-      'Ejecuta tareas automáticas cada 30 min para guardar lecturas diarias del Diario (00:00 UTC) y registrar/auditar la mejor Opción de Trading en ventanas de 4 h contra velas reales.',
+      'Ejecuta tareas automáticas cada 30 min: guarda las lecturas diarias del Diario (00:00 UTC) y registra TODAS las opciones emitidas (una por activo, estrategia y tanda de 4 h) para evaluarlas después contra velas reales.',
     inputs: ['Motor cuantitativo', 'Colector L2 cada 60 s', 'Velas 1H de cierre real'],
-    outputs: ['journal/predictions_*.jsonl', 'journal/trade_options.jsonl', 'Export CSV/JSONL'],
+    outputs: ['data/journal/predictions_*.jsonl', 'data/journal/trade_options.jsonl', 'Export CSV/JSONL'],
     endpoints: ['/api/journal', '/api/journal/auto', '/api/micro/collector'],
     details: [
       'Orden conservador en auditoría: si SL y TP ocurren en la misma vela 1H, se contabiliza SL primero.',
-      'Funciona de forma continua incluso sin sesión de navegador abierta.',
+      'Funciona mientras la app esté abierta, aunque no haya ninguna pestaña del navegador. Al reabrirla retoma el registro y evalúa lo pendiente con el histórico necesario.',
     ],
     targetTab: 'journal',
     targetLabel: 'Ir a Diario',
+  },
+
+  {
+    id: 'eval_engine',
+    layer: 'Persistencia & Cron',
+    col: 2,
+    x: 584,
+    y: 212,
+    w: 224,
+    h: 132,
+    title: 'Evaluación Forward & Estadística',
+    subtitle: '¿Acierta la app? Con línea base y significancia',
+    accent: 'emerald',
+    summary:
+      'Compara cada opción guardada con las velas 1H posteriores: TP1/TP2/SL, dirección acertada al final del horizonte y operación espejo como control de azar. Emite un veredicto solo con muestra suficiente.',
+    inputs: ['trade_options.jsonl', 'Velas 1H cerradas posteriores a cada opción'],
+    outputs: ['Veredicto con línea base y p-valor', 'Calibración, Brier, curvas y tablas por estrategia / veredicto / contexto'],
+    endpoints: ['/api/trade-options', '/api/trade-options/export?format=csv|jsonl'],
+    details: [
+      'Muestras independientes (sin solape), intervalo de Wilson, test binomial y test ajustado por la línea base (mezcla largos/cortos y mercado alcista).',
+      'Veredicto principal con al menos 30 muestras independientes; antes muestra el progreso y una estimación de cuándo se alcanzará.',
+      'Mide también si las estrategias «validadas» rinden mejor que el resto, que es la prueba de que el backtest sirve.',
+    ],
+    targetTab: 'trade_options',
+    targetLabel: 'Ir a Opciones de Trading',
+  },
+  {
+    id: 'data_store',
+    layer: 'Persistencia & Cron',
+    col: 2,
+    x: 584,
+    y: 364,
+    w: 224,
+    h: 132,
+    title: 'Almacén Local (data/)',
+    subtitle: 'Persistencia entre ejecuciones',
+    accent: 'sky',
+    summary:
+      'Todo se guarda en la carpeta data/ junto a la app (o al .exe) y se conserva al apagar el equipo o actualizar la versión. Cada arranque retoma lo anterior y añade datos nuevos.',
+    inputs: ['Opciones, lecturas del diario, microestructura, ajustes'],
+    outputs: ['JSONL con escritura atómica', 'Backups diarios (últimos 14) y registro de sesiones'],
+    endpoints: ['/api/data-status'],
+    details: [
+      'Escritura atómica (fichero temporal + renombrado) y lector tolerante: una línea dañada se aparta sin perder el resto.',
+      'Registra cuándo estuvo encendida la app para mostrar huecos y cobertura; los ajustes (diario automático, colector) se recuerdan.',
+      'Migra los datos de la antigua carpeta journal/ y se puede mover con DATA_DIR / JOURNAL_DIR.',
+    ],
   },
 
   // Col 3: Frontend SPA Views
@@ -274,10 +346,10 @@ const NODES: ArchNode[] = [
     summary:
       'Integra la matriz de esperanza matemática (EV/Kelly), simulador interactivo SL/TP, visualización de Sesgo del Mercado (GEX Positivo vs Negativo) y registro auditable de operaciones.',
     inputs: ['/api/trades', '/api/trades/simulate', '/api/trade-options'],
-    outputs: ['Filtros Gamma Flip / En Tendencia', 'Registro manual y cierre de operaciones'],
+    outputs: ['Propuestas ★ con riesgo sugerido', 'Panel de evaluación forward y registro de operaciones'],
     endpoints: ['Vista: Rejilla EV', 'Vista: Opciones de Trading'],
     details: [
-      'Desglose expandible de los 8 factores de confluencia evaluados en cada propuesta.',
+      'Calidad y veredicto en cada propuesta, desglose de los 9 factores de confluencia, historial medido por estrategia y motivos de «no operar».',
       'Cada opción generada se guarda en local y se evalúa contra el precio posterior (TP1/TP2/SL y dirección al horizonte).',
     ],
     targetTab: 'trade_options',
@@ -372,6 +444,48 @@ const EDGES: ArchEdge[] = [
     scenarios: ['all', 'micro_l2'],
   },
   {
+    id: 'e_cache_signals',
+    from: 'market_cache',
+    to: 'signals_backtest',
+    label: 'Velas 1H (4,000) + 1D',
+    scenarios: ['all', 'trade_options'],
+  },
+  {
+    id: 'e_signals_options',
+    from: 'signals_backtest',
+    to: 'trade_options_svc',
+    label: 'Setups + veredicto',
+    scenarios: ['all', 'trade_options'],
+  },
+  {
+    id: 'e_options_eval',
+    from: 'trade_options_svc',
+    to: 'eval_engine',
+    label: 'Opciones registradas',
+    scenarios: ['all', 'trade_options'],
+  },
+  {
+    id: 'e_options_store',
+    from: 'trade_options_svc',
+    to: 'data_store',
+    label: 'Escritura atómica JSONL',
+    scenarios: ['all', 'trade_options', 'journal_cloud'],
+  },
+  {
+    id: 'e_eval_ui',
+    from: 'eval_engine',
+    to: 'ui_trading',
+    label: 'Veredicto de acierto',
+    scenarios: ['all', 'trade_options'],
+  },
+  {
+    id: 'e_store_ui',
+    from: 'data_store',
+    to: 'ui_audit',
+    label: 'Estado, backups, sesiones',
+    scenarios: ['all', 'journal_cloud'],
+  },
+  {
     id: 'e_quant_ui',
     from: 'quant_engine',
     to: 'ui_quant',
@@ -435,7 +549,19 @@ const PIPELINE_ROWS: PipelineBenchmarkRow[] = [
     mcPaths: 4000,
     horizonLabel: '24 h / 72 h',
     mathNotes:
-      'Combina 12+ indicadores técnicos con la diferencia entre GEX Positivo (Calls) y GEX Negativo (Puts), evalúa 4 estrategias sobre 4,000 rutas GARCH y audita resultados reales cada hora.',
+      'Cada estrategia entra solo si cumple sus condiciones (filtro de tendencia diaria, SL tras swing, TP limitado por niveles). Puntúa con confluencia de 9 factores y el historial medido; las 4,000 rutas GARCH dan P(TP) y EV con deriva neutra.',
+    targetTab: 'trade_options',
+  },
+  {
+    id: 'backtest',
+    module: 'Backtest de Estrategias & Evaluación Forward',
+    endpoint: 'GET /api/trade-options',
+    cadence: 'Backtest cada 3 h por activo; evaluación en cada consulta',
+    candlesUsed: 4000,
+    mcPaths: 0,
+    horizonLabel: '24 h / 72 h',
+    mathNotes:
+      'Replay de las mismas reglas sobre ~160 días (cada 4 h, sin solape, SL primero, coste 0,07 %) y esperanza en R con error estándar. Veredicto: validada si el límite inferior (90 %) supera 0. Las operaciones reales se evalúan con línea base y operación espejo.',
     targetTab: 'trade_options',
   },
   {
@@ -601,7 +727,7 @@ export const ArchitectureView: React.FC<Props> = ({ asset, onNavigateTab }) => {
       <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-5 flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-1 max-w-3xl">
           <h2 className="text-base font-display font-semibold text-slate-900 dark:text-slate-50">
-            Arquitectura del Sistema · Flujo Cuantitativo y Persistencia Híbrida
+            Arquitectura del Sistema · Flujo Cuantitativo, Validación y Datos Locales
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Diagrama interactivo de la estructura real de Trading Predictor para {asset.toUpperCase()}-USDT-SWAP. Selecciona un flujo operativo o haz clic sobre cualquier módulo para inspeccionar entradas, salidas, modelos matemáticos y endpoints.
@@ -622,6 +748,48 @@ export const ArchitectureView: React.FC<Props> = ({ asset, onNavigateTab }) => {
         </button>
       </div>
 
+      {/* Estado real de los datos locales */}
+      <DataStatusBar />
+
+      {/* Ciclo de vida de una opción de trading */}
+      <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-5 space-y-3">
+        <div>
+          <h3 className="text-sm font-display font-semibold text-slate-900 dark:text-slate-50">
+            Ciclo de vida de una opción de trading
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            De los datos de mercado a saber si la app acierta: cada paso se puede inspeccionar en el diagrama.
+          </p>
+        </div>
+        <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+          {[
+            { t: 'Datos', d: 'Velas 1H/1D de OKX, derivados y cadena de opciones de Deribit, con caché y reintentos.', node: 'market_cache' },
+            { t: 'Condiciones', d: 'Cada estrategia propone solo si se cumplen sus condiciones; si no, explica por qué no opera.', node: 'signals_backtest' },
+            { t: 'Historial medido', d: 'Las mismas reglas se repiten sobre ~160 días y se combinan con las operaciones reales: veredicto por estrategia.', node: 'signals_backtest' },
+            { t: 'Calidad y riesgo', d: 'Calidad = setup + confluencia + historial. El riesgo sugerido es mínimo sin ventaja validada.', node: 'trade_options_svc' },
+            { t: 'Registro local', d: 'Cada opción emitida se guarda en data/ con su contexto de mercado congelado.', node: 'data_store' },
+            { t: 'Evaluación forward', d: 'Se compara con el precio posterior (TP1/TP2/SL, dirección, operación espejo) y se emite un veredicto con significancia.', node: 'eval_engine' },
+          ].map((st, i) => (
+            <li key={st.t}>
+              <button
+                type="button"
+                onClick={() => {
+                  setScenario('trade_options');
+                  setSelectedNodeId(st.node);
+                }}
+                className="w-full h-full text-left rounded-md border border-slate-200 dark:border-slate-800 p-3 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer"
+              >
+                <div className="font-semibold text-slate-900 dark:text-slate-100">
+                  <span className="font-mono tabular-nums text-sky-600 dark:text-sky-400 mr-1.5">{i + 1}.</span>
+                  {st.t}
+                </div>
+                <div className="mt-1 text-slate-600 dark:text-slate-300">{st.d}</div>
+              </button>
+            </li>
+          ))}
+        </ol>
+      </div>
+
       {/* Structural Summary KPI Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
@@ -637,10 +805,10 @@ export const ArchitectureView: React.FC<Props> = ({ asset, onNavigateTab }) => {
         <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
           <div className="text-xs text-slate-500 dark:text-slate-400">Capa 2 · Backend Express + TS</div>
           <div className="mt-1.5 text-lg font-display font-semibold text-slate-900 dark:text-slate-50 font-mono tabular-nums">
-            6 Módulos · 17 Endpoints
+            8 Módulos · 26 Endpoints
           </div>
           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            GARCH, SVI, GEX, EV, Rotación, L2
+            GARCH, SVI, GEX, Backtest, Evaluación
           </div>
         </div>
 
@@ -650,7 +818,7 @@ export const ArchitectureView: React.FC<Props> = ({ asset, onNavigateTab }) => {
             JSONL Local
           </div>
           <div className="mt-1 text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
-            Carpeta journal/ (configurable con JOURNAL_DIR)
+            data/ · se conserva entre ejecuciones
           </div>
         </div>
 
@@ -698,7 +866,7 @@ export const ArchitectureView: React.FC<Props> = ({ asset, onNavigateTab }) => {
         {/* Interactive SVG Architecture Canvas */}
         <div className="overflow-x-auto border border-slate-200/80 dark:border-slate-800/80 rounded-md bg-slate-50/70 dark:bg-slate-950/50">
           <svg
-            viewBox="0 0 1120 484"
+            viewBox="0 0 1120 560"
             className="w-full min-w-[860px] h-auto select-none"
             role="img"
             aria-label="Diagrama interactivo de la arquitectura de Trading Predictor"
@@ -733,7 +901,7 @@ export const ArchitectureView: React.FC<Props> = ({ asset, onNavigateTab }) => {
               [
                 { col: 0, x: 24, w: 224, label: '01. Ingesta Externa' },
                 { col: 1, x: 298, w: 236, label: '02. Motor Backend (Express)' },
-                { col: 2, x: 584, w: 224, label: '03. Persistencia & Cron' },
+                { col: 2, x: 584, w: 224, label: '03. Evaluación & Datos' },
                 { col: 3, x: 860, w: 236, label: '04. Vistas React SPA' },
               ] as const
             ).map((hdr) => (
