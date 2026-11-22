@@ -333,6 +333,10 @@ export interface ScoredRow {
   pit: number;
   in90_ens: number | null;
   in90_opt: number | null;
+  pin: number;
+  pin_ens: number | null;
+  pin_opt: number | null;
+  p_up: number | null;
   fund: string;
   oi_flush: boolean | null;
   gmm: string | null;

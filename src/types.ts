@@ -353,6 +353,10 @@ export interface JournalAssetData {
     pit: number;
     in90_ens: number | null;
     in90_opt: number | null;
+    pin: number;
+    pin_ens: number | null;
+    pin_opt: number | null;
+    p_up: number | null;
     fund: string;
     oi_flush: boolean | null;
     gmm: string | null;
@@ -364,6 +368,17 @@ export interface JournalAssetData {
     c90: number | null;
     c90_ens: number | null;
     c90_opt: number | null;
+    n_indep: number;
+    kupiec_p: number | null;
+    pit_mean: number | null;
+    pit_ks: number | null;
+    pit_ks_crit: number | null;
+    pin: number | null;
+    pin_ens: number | null;
+    pin_opt: number | null;
+    brier: number | null;
+    brier_ref: number | null;
+    verdict: 'calibrado' | 'sesgado' | 'datos_insuficientes';
   }>;
   by_flag: Array<{
     reading: string;

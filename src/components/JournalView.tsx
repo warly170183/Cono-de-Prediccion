@@ -161,6 +161,62 @@ export const JournalView: React.FC<Props> = ({
                 </table>
               </div>
 
+              {/* Calibración estadística */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Calibración estadística (muestra independiente)
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2">
+                  Kupiec: ¿la cobertura del 90 % es compatible con 90 %? PIT/KS: ¿los resultados caen uniformes dentro del cono? Pinball: error del cono (menor = mejor; compara modelos). Brier: acierto probabilístico de P(sube) frente a 0,25 de una moneda al aire. Con menos de 20 muestras independientes no se emite veredicto.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs font-mono tabular-nums">
+                    <thead>
+                      <tr className="text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                        <th className="py-1 text-left font-medium">Horiz.</th>
+                        <th className="py-1 text-right font-medium">n ind.</th>
+                        <th className="py-1 text-right font-medium">p Kupiec</th>
+                        <th className="py-1 text-right font-medium">PIT μ</th>
+                        <th className="py-1 text-right font-medium">KS/crít.</th>
+                        <th className="py-1 text-right font-medium">Pin. base</th>
+                        <th className="py-1 text-right font-medium">Ens.</th>
+                        <th className="py-1 text-right font-medium">Opt.</th>
+                        <th className="py-1 text-right font-medium">Brier</th>
+                        <th className="py-1 text-right font-medium">Veredicto</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                      {item.coverage.map((c) => (
+                        <tr key={c.horizon}>
+                          <td className="py-1.5">{c.horizon} h</td>
+                          <td className="py-1.5 text-right">{c.n_indep}</td>
+                          <td className="py-1.5 text-right">{c.kupiec_p !== null ? c.kupiec_p.toFixed(3) : '—'}</td>
+                          <td className="py-1.5 text-right">{c.pit_mean !== null ? c.pit_mean.toFixed(2) : '—'}</td>
+                          <td className="py-1.5 text-right">
+                            {c.pit_ks !== null && c.pit_ks_crit !== null ? `${c.pit_ks.toFixed(2)}/${c.pit_ks_crit.toFixed(2)}` : '—'}
+                          </td>
+                          <td className="py-1.5 text-right">{c.pin !== null ? c.pin.toFixed(3) : '—'}</td>
+                          <td className="py-1.5 text-right">{c.pin_ens !== null ? c.pin_ens.toFixed(3) : '—'}</td>
+                          <td className="py-1.5 text-right">{c.pin_opt !== null ? c.pin_opt.toFixed(3) : '—'}</td>
+                          <td className="py-1.5 text-right">{c.brier !== null ? c.brier.toFixed(3) : '—'}</td>
+                          <td
+                            className={`py-1.5 text-right font-sans font-medium ${
+                              c.verdict === 'calibrado'
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : c.verdict === 'sesgado'
+                                  ? 'text-rose-600 dark:text-rose-400'
+                                  : 'text-slate-500 dark:text-slate-400'
+                            }`}
+                          >
+                            {c.verdict === 'calibrado' ? 'Calibrado' : c.verdict === 'sesgado' ? 'Sesgado' : 'Pocos datos'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
               {/* 1-Click Exports */}
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-2">
                 <a

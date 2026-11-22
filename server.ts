@@ -31,6 +31,7 @@ import {
   loadJournalPredictions,
   runLivePredictionSnapshot,
   scorePredictions,
+  SCORING_CANDLES,
   setAutoJournalEnabled,
   startAutoJournalScheduler,
   summarizeByFlag,
@@ -451,7 +452,7 @@ async function startServer() {
           const preds = loadJournalPredictions(asset);
           let candles1h: Awaited<ReturnType<typeof fetchOkxCandles>> = [];
           try {
-            candles1h = await fetchOkxCandles(asset, '1H', 500, false);
+            candles1h = await fetchOkxCandles(asset, '1H', SCORING_CANDLES, false);
           } catch (e) {
             console.warn(`Unable to fetch 1H candles for ${asset} scoring:`, e);
           }
