@@ -406,7 +406,7 @@ export const TradeGridView: React.FC<Props> = ({ data }) => {
               Rejilla Stop-Loss / Take-Profit sobre Trayectorias Neutrales
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Evaluación al cierre horario (incluye saltos de brecha) con martingala exacta y coste round-trip de {data.cost_pct.toFixed(2)} %. Haz clic en cualquier fila para cargarla en el simulador.
+              Toques de SL/TP dentro de la vela (corrección de barrera) con martingala exacta y coste round-trip de {data.cost_pct.toFixed(2)} %. Con deriva neutra no debe haber ventaja por construcción: la columna «Ventaja necesaria» indica los puntos porcentuales de acierto que faltan para EV=0. Haz clic en una fila para cargarla en el simulador.
             </p>
           </div>
 
@@ -447,6 +447,7 @@ export const TradeGridView: React.FC<Props> = ({ data }) => {
                 <th className="py-2 text-right font-medium">P(SL)</th>
                 <th className="py-2 text-right font-medium">P(Timeout)</th>
                 <th className="py-2 text-right font-medium">Acierto BE</th>
+                <th className="py-2 text-right font-medium">Ventaja necesaria</th>
                 <th className="py-2 text-right font-medium">EV neto %</th>
                 <th className="py-2 text-right font-medium">EV (R)</th>
                 <th className="py-2 text-right font-medium">Kelly %</th>
@@ -471,6 +472,10 @@ export const TradeGridView: React.FC<Props> = ({ data }) => {
                   <td className="py-2 text-right">{r.p_sl_pct.toFixed(1)} %</td>
                   <td className="py-2 text-right text-slate-500 dark:text-slate-400">{r.p_to_pct.toFixed(1)} %</td>
                   <td className="py-2 text-right text-slate-500 dark:text-slate-400">{r.be_pct.toFixed(1)} %</td>
+                  <td className="py-2 text-right text-slate-500 dark:text-slate-400">
+                    {r.be_pct - r.p_tp_pct >= 0 ? '+' : ''}
+                    {(r.be_pct - r.p_tp_pct).toFixed(1)} pp
+                  </td>
                   <td
                     className={`py-2 text-right font-medium ${
                       r.ev_pct > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'

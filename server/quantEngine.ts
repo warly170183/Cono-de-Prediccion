@@ -1173,6 +1173,38 @@ export function computeDerivativesReadings(params: {
 }
 
 /**
+ * Simula una operación con SL/TP sobre un camino de log-retornos acumulados (muestreado al cierre horario).
+ * - Los niveles se tocan DENTRO de la vela: se acercan 0,5826·σ (Broadie-Glasserman-Kou) para no infravalorar toques.
+ * - Una orden stop/límite se ejecuta EN su nivel (no en el cierre que lo sobrepasa): salida = +tp / -sl.
+ * - Si SL y TP caen en el mismo paso, cuenta el SL (criterio conservador, igual que la evaluación en vivo).
+ * Devuelve el retorno bruto (antes de costes) en dirección de la operación.
+ */
+export function simulateBarrierTrade(
+  path: Float64Array,
+  H: number,
+  isLong: boolean,
+  sl: number,
+  tp: number,
+  driftPerHour: number,
+  sigmaStep: number,
+): { outcome: 'win' | 'loss' | 'to'; gross: number } {
+  const shift = 0.5826 * sigmaStep;
+  const tpTrig = Math.max(tp * 0.5, tp - shift);
+  const slTrig = Math.max(sl * 0.5, sl - shift);
+  for (let s = 0; s < H; s++) {
+    const ret = Math.exp(path[s] + driftPerHour * (s + 1)) - 1;
+    const r = isLong ? ret : -ret;
+    const hitWin = r >= tpTrig;
+    const hitLoss = r <= -slTrig;
+    if (hitWin || hitLoss) {
+      return hitLoss ? { outcome: 'loss', gross: -sl } : { outcome: 'win', gross: tp };
+    }
+  }
+  const retEnd = Math.exp(path[H - 1] + driftPerHour * H) - 1;
+  return { outcome: 'to', gross: isLong ? retEnd : -retEnd };
+}
+
+/**
  * Computes Stop/Target EV/Kelly grid on martingale-adjusted GARCH paths + technical features + contrarian events (trades.py).
  */
 export function computeTradeGrid(asset: AssetId, candles1h: Candle[]): TradeAnalysisOutput {
@@ -1188,6 +1220,7 @@ export function computeTradeGrid(asset: AssetId, candles1h: Candle[]): TradeAnal
   const rPct = lr.map((x) => x * 100);
   const fit = fitGjrGarch(rPct);
   const cumPaths = simulateGarchPaths(fit, rPct[rPct.length - 1], H, N, 11, true);
+  const sigmaStep = fit.condVolPct[fit.condVolPct.length - 1] / 100;
 
   const SLs = [0.01, 0.015, 0.02, 0.03, 0.04];
   const TPs = [0.01, 0.02, 0.03, 0.04, 0.06, 0.08];
@@ -1203,27 +1236,11 @@ export function computeTradeGrid(asset: AssetId, candles1h: Candle[]): TradeAnal
     let sumX2 = 0;
 
     for (let i = 0; i < N; i++) {
-      const path = cumPaths[i];
-      let exitStep = H - 1;
-      let outcomeType: 'win' | 'loss' | 'to' = 'to';
-
-      for (let s = 0; s < H; s++) {
-        const ret = Math.exp(path[s] + driftPerHour * (s + 1)) - 1;
-        const hitWin = isLong ? ret >= tp : ret <= -tp;
-        const hitLoss = isLong ? ret <= -sl : ret >= sl;
-        if (hitWin || hitLoss) {
-          exitStep = s;
-          outcomeType = hitWin && !hitLoss ? 'win' : 'loss';
-          break;
-        }
-      }
-
-      if (outcomeType === 'win') winCnt++;
-      else if (outcomeType === 'loss') lossCnt++;
+      const sim = simulateBarrierTrade(cumPaths[i], H, isLong, sl, tp, driftPerHour, sigmaStep);
+      if (sim.outcome === 'win') winCnt++;
+      else if (sim.outcome === 'loss') lossCnt++;
       else toCnt++;
-
-      const exitRet = Math.exp(path[exitStep] + driftPerHour * (exitStep + 1)) - 1;
-      const out = (isLong ? 1 : -1) * exitRet - COST;
+      const out = sim.gross - COST;
       const rMult = out / sl;
       sumOut += out;
       sumOut2 += out * out;
@@ -1455,6 +1472,7 @@ export function simulateCustomTrade(params: {
   const rPct = lr.map((x) => x * 100);
   const fit = fitGjrGarch(rPct);
   const cumPaths = simulateGarchPaths(fit, rPct[rPct.length - 1], H, N, 11, true);
+  const sigmaStep = fit.condVolPct[fit.condVolPct.length - 1] / 100;
 
   const sl = Math.max(0.002, params.slPct / 100);
   const tp = Math.max(0.002, params.tpPct / 100);
@@ -1471,25 +1489,11 @@ export function simulateCustomTrade(params: {
   let sumX2 = 0;
 
   for (let i = 0; i < N; i++) {
-    const path = cumPaths[i];
-    let exitStep = H - 1;
-    let outcomeType: 'win' | 'loss' | 'to' = 'to';
-    for (let s = 0; s < H; s++) {
-      const ret = Math.exp(path[s] + driftPerHour * (s + 1)) - 1;
-      const hitWin = isLong ? ret >= tp : ret <= -tp;
-      const hitLoss = isLong ? ret <= -sl : ret >= sl;
-      if (hitWin || hitLoss) {
-        exitStep = s;
-        outcomeType = hitWin && !hitLoss ? 'win' : 'loss';
-        break;
-      }
-    }
-    if (outcomeType === 'win') winCnt++;
-    else if (outcomeType === 'loss') lossCnt++;
+    const sim = simulateBarrierTrade(cumPaths[i], H, isLong, sl, tp, driftPerHour, sigmaStep);
+    if (sim.outcome === 'win') winCnt++;
+    else if (sim.outcome === 'loss') lossCnt++;
     else toCnt++;
-
-    const exitRet = Math.exp(path[exitStep] + driftPerHour * (exitStep + 1)) - 1;
-    const out = (isLong ? 1 : -1) * exitRet - cost;
+    const out = sim.gross - cost;
     const rMult = out / sl;
     sumOut += out;
     sumOut2 += out * out;

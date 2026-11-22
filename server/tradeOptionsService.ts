@@ -29,6 +29,7 @@ import {
   computeDerivativesReadings,
   computeGex,
   fitGjrGarch,
+  simulateBarrierTrade,
   simulateGarchPaths,
 } from './quantEngine.ts';
 
@@ -279,6 +280,7 @@ function evaluateOnPaths(
   slPct: number,
   tpPct: number,
   drift24hPct: number,
+  sigmaStep: number,
 ) {
   const N = cumPaths.length;
   const sl = Math.max(0.004, slPct / 100);
@@ -294,25 +296,11 @@ function evaluateOnPaths(
   let sumX2 = 0;
 
   for (let i = 0; i < N; i++) {
-    const path = cumPaths[i];
-    let exitStep = horizon - 1;
-    let outcome: 'win' | 'loss' | 'to' = 'to';
-    for (let s = 0; s < horizon; s++) {
-      const ret = Math.exp(path[s] + driftPerHour * (s + 1)) - 1;
-      const hitWin = isLong ? ret >= tp : ret <= -tp;
-      const hitLoss = isLong ? ret <= -sl : ret >= sl;
-      if (hitWin || hitLoss) {
-        exitStep = s;
-        outcome = hitWin && !hitLoss ? 'win' : 'loss';
-        break;
-      }
-    }
-    if (outcome === 'win') winCnt++;
-    else if (outcome === 'loss') lossCnt++;
+    const sim = simulateBarrierTrade(cumPaths[i], horizon, isLong, sl, tp, driftPerHour, sigmaStep);
+    if (sim.outcome === 'win') winCnt++;
+    else if (sim.outcome === 'loss') lossCnt++;
     else toCnt++;
-
-    const exitRet = Math.exp(path[exitStep] + driftPerHour * (exitStep + 1)) - 1;
-    const out = (isLong ? 1 : -1) * exitRet - ROUND_TRIP_COST;
+    const out = sim.gross - ROUND_TRIP_COST;
     const rMult = out / sl;
     sumOut += out;
     sumX += rMult;
@@ -802,6 +790,7 @@ export async function computeTradeOptions(
     const rPct = lr.map((x) => x * 100);
     const fit = fitGjrGarch(rPct);
     const cumPaths = simulateGarchPaths(fit, rPct[rPct.length - 1], 72, 4000, 17, true);
+    const sigmaStep = fit.condVolPct[fit.condVolPct.length - 1] / 100;
 
     const anchorTs = block.last_ts;
     const bucketKey = String(Math.floor(anchorTs / (4 * HOUR)));
@@ -976,7 +965,7 @@ export async function computeTradeOptions(
       const confluenceScore = scoreConfluence(factors, spec.dir);
       // Drift condicional por confluencia, DESACTIVADO por defecto (EDGE_TILT_MAX_PCT_24H=0).
       const edgeTilt = ((confluenceScore - 50) / 50) * EDGE_TILT_MAX_PCT_24H * (isLong ? 1 : -1);
-      const sim = evaluateOnPaths(cumPaths, spec.horizonHours, spec.dir, slPct, tp1Pct, edgeTilt);
+      const sim = evaluateOnPaths(cumPaths, spec.horizonHours, spec.dir, slPct, tp1Pct, edgeTilt, sigmaStep);
 
       const track = trackOf(spec.strategyKey);
       const verdictAdj: Record<EdgeVerdict, number> = {
