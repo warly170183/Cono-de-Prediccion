@@ -190,6 +190,7 @@ export interface RotationResponse {
   phase_pos_share: number;
   avg_turnover_day: number;
   verdict: 'sin_ventaja' | 'indicios' | 'robusta_con_sesgo';
+  universe_snapshots?: { days: number; first: string | null; last: string | null };
   share_variants_sharpe_pos: number;
   variants: Record<string, RotationVariantStats>;
   current_ranking: Array<{

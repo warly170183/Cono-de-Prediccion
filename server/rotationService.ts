@@ -1,4 +1,8 @@
 import type { RotationResponse, RotationVariantStats } from './types.ts';
+import fs from 'fs';
+import path from 'path';
+import { JOURNAL_DIR } from './paths.ts';
+import { readJsonl } from './storage.ts';
 import { dsr, expectedMaxSharpe, nwTstat, psr, sharpe } from './quantEngine.ts';
 
 const OKX_API = 'https://www.okx.com/api/v5';
@@ -8,6 +12,32 @@ const LOOKS = [7, 14, 30, 60, 90] as const;
 const KS = [3, 5, 8] as const;
 const REBS = [3, 7, 14] as const;
 const COST = 0.0005;
+
+const UNIVERSE_FILE = path.join(JOURNAL_DIR, 'rotation_universe.jsonl');
+
+interface UniverseSnap { date: string; symbols: string[] }
+
+/**
+ * Guarda cada día el top-40 real por volumen. Con el tiempo permite reconstruir el universo que
+ * existía en cada fecha y corregir el sesgo de supervivencia (hoy el universo es el de hoy).
+ */
+export function recordUniverseSnapshot(symbols: string[], now = Date.now()): boolean {
+  try {
+    const date = new Date(now).toISOString().slice(0, 10);
+    const rows = readJsonl<UniverseSnap>(UNIVERSE_FILE);
+    if (rows.some((r) => r.date === date)) return false;
+    fs.mkdirSync(JOURNAL_DIR, { recursive: true });
+    fs.appendFileSync(UNIVERSE_FILE, JSON.stringify({ date, symbols }) + '\n', 'utf-8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function universeSnapshotInfo() {
+  const rows = readJsonl<UniverseSnap>(UNIVERSE_FILE);
+  return { days: rows.length, first: rows[0]?.date ?? null, last: rows[rows.length - 1]?.date ?? null };
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -133,6 +163,7 @@ async function loadUniverseMatrix(forceRefresh: boolean) {
   await Promise.all([worker(), worker()]);
 
   const symbols = Array.from(seriesMap.keys());
+  recordUniverseSnapshot(candidates.slice(0, N_UNI).map((c) => c.base));
   const dateSet = new Set<string>();
   for (const m of seriesMap.values()) {
     for (const d of m.keys()) dateSet.add(d);
@@ -414,6 +445,7 @@ export async function getRotationAnalysis(forceRefresh = false): Promise<Rotatio
       share_variants_sharpe_pos: Number(sharePos.toFixed(3)),
       variants,
       current_ranking: rankRows,
+      universe_snapshots: universeSnapshotInfo(),
     };
 
     cachedRotation = { expiresAt: Date.now() + 30 * 60_000, data: result };
@@ -423,4 +455,9 @@ export async function getRotationAnalysis(forceRefresh = false): Promise<Rotatio
   });
 
   return inflightRotation;
+}
+
+/** Último resultado en caché (sin lanzar descargas). */
+export function peekRotation(): RotationResponse | null {
+  return cachedRotation?.data ?? null;
 }

@@ -114,7 +114,7 @@ export const RotationView: React.FC<Props> = ({ data, loading, onRefresh }) => {
           Exige DSR &gt; 0,95, t &gt; 3, IC95 sobre cero, ambas mitades positivas y ≥ 80 % de las fases de rebalanceo con SR &gt; 0. Nunca se declara «validada»: el universo actual excluye monedas deslistadas.
         </p>
         <div className="mt-2 font-mono tabular-nums text-slate-500 dark:text-slate-400">
-          SR por fase (rebalanceo desplazado 0–6 d): {data.phase_sharpes.map((v) => v.toFixed(2)).join(' · ')} · {(data.phase_pos_share * 100).toFixed(0)} % positivas · Rotación media {(data.avg_turnover_day * 100).toFixed(0)} %/día
+          SR por fase (rebalanceo desplazado 0–6 d): {data.phase_sharpes.map((v) => v.toFixed(2)).join(' · ')} · {(data.phase_pos_share * 100).toFixed(0)} % positivas · Rotación media {(data.avg_turnover_day * 100).toFixed(0)} %/día · Universo diario guardado: {data.universe_snapshots?.days ?? 0} día(s) (base para corregir el sesgo de supervivencia)
         </div>
       </div>
 

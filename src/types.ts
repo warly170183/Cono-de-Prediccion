@@ -7,6 +7,8 @@ export type NavTab =
   | 'rotation'
   | 'journal'
   | 'micro'
+  | 'health'
+  | 'paper'
   | 'architecture';
 
 export interface GarchParams {
@@ -188,6 +190,7 @@ export interface RotationResponse {
   phase_pos_share: number;
   avg_turnover_day: number;
   verdict: 'sin_ventaja' | 'indicios' | 'robusta_con_sesgo';
+  universe_snapshots?: { days: number; first: string | null; last: string | null };
   share_variants_sharpe_pos: number;
   variants: Record<string, RotationVariantStats>;
   current_ranking: Array<{
@@ -832,4 +835,47 @@ export interface TargetProbability {
   sigmaHourPct: number;
   ensRatio: { '24': number; '72': number };
   generated: number;
+}
+
+export type HealthLevel = 'ok' | 'warn' | 'bad' | 'wait';
+export interface HealthResponse {
+  generated: number;
+  overall: HealthLevel;
+  campaign: { startTs: number | null; days: number; targetDays: number; pct: number; done: boolean };
+  items: Array<{ id: string; module: string; level: HealthLevel; text: string }>;
+  degraded: Array<{ key: string; since: number; lastError: string }>;
+  collector: { running: boolean; bars: number };
+}
+
+export interface AlertSettingsPublic {
+  enabled: boolean;
+  telegramConfigured: boolean;
+  webhookConfigured: boolean;
+  webhookUrl?: string;
+  telegramChatId?: string;
+  events: { setup: boolean; gex: boolean; cono: boolean; fuentes: boolean };
+  gexProximityPct: number;
+}
+
+export interface PaperConfigT {
+  startEquity: number;
+  riskPct: number;
+  maxDailyRiskPct: number;
+  maxDirRiskPct: number;
+  maxPerAsset: number;
+  minVerdict: 'validada' | 'prometedora' | 'todas';
+  maxDrawdownStopPct: number;
+}
+export interface PaperResponse {
+  config: PaperConfigT;
+  trades: Array<{
+    id: string; asset: string; strategyKey: string; dir: 'long' | 'short'; openTs: number; closeTs: number | null;
+    riskPct: number; rMultiple: number | null; pnl: number | null; equityAfter: number | null; status: string;
+  }>;
+  skipped: Array<{ id: string; asset: string; ts: number; reason: string }>;
+  equity: Array<{ ts: number; equity: number }>;
+  stats: {
+    n_closed: number; n_open: number; win_rate_pct: number | null; total_return_pct: number; max_dd_pct: number;
+    profit_factor: number | null; avg_r: number | null; open_risk_pct: number; halted: boolean;
+  };
 }

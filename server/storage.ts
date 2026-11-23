@@ -122,6 +122,18 @@ export function heartbeat(now = Date.now()): void {
 export interface AppSettings {
   autoJournal?: boolean;
   micro?: { running: boolean; asset: AssetId };
+  alerts?: AlertSettings;
+  paper?: Partial<import('./paperTrading.ts').PaperConfig>;
+}
+
+export interface AlertSettings {
+  enabled: boolean;
+  telegramToken?: string;
+  telegramChatId?: string;
+  webhookUrl?: string;
+  events: { setup: boolean; gex: boolean; cono: boolean; fuentes: boolean };
+  /** Distancia (%) al nivel GEX que dispara el aviso. */
+  gexProximityPct: number;
 }
 
 export const readSettings = (): AppSettings => readJson<AppSettings>(SETTINGS_FILE, {});

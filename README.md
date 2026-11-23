@@ -48,3 +48,11 @@ Para llevarte los datos a otro equipo, copia la carpeta `data/`. Variables opcio
 ## Pruebas
 
 `npm test`
+
+
+## Salud, alertas y paper trading
+
+- **Salud & Alertas**: veredicto por módulo (cono, opciones, microestructura, rotación, fuentes) y progreso de la campaña de medición de 28 días. Alertas por Telegram o webhook (setup validado, cercanía a gamma flip/walls, cono descalibrado, fuentes caídas); el token se guarda solo en `data/settings.json` y nunca se envía a la interfaz.
+- **Paper**: cartera simulada con las propuestas registradas, riesgo fijo por operación y límites diario, direccional y por activo, con parada por drawdown. Se recalcula desde el registro.
+- **Modo degradado**: si OKX/Deribit fallan, se sirve el último dato (hasta 6 h) y la fuente queda marcada.
+- **Universo de rotación**: cada día se guarda el top-40 real en `rotation_universe.jsonl` para poder corregir el sesgo de supervivencia en el futuro.

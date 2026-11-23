@@ -10,6 +10,14 @@ interface CacheEntry<T> {
 
 const cache = new Map<string, CacheEntry<unknown>>();
 const inflight = new Map<string, Promise<unknown>>();
+/** Un dato caducado se sigue sirviendo hasta 6 h si la fuente falla. */
+const STALE_MAX_MS = 6 * 3_600_000;
+const degraded = new Map<string, { since: number; lastError: string }>();
+
+/** Fuentes que ahora mismo se sirven desde caché antigua por fallo de la API. */
+export function getDegradedSources(): Array<{ key: string; since: number; lastError: string }> {
+  return Array.from(degraded.entries()).map(([key, v]) => ({ key, ...v }));
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchJson<T>(url: string, timeoutMs = 15000): Promise<T> {
@@ -61,7 +69,16 @@ async function cached<T>(key: string, ttlMs: number, forceRefresh: boolean, fn: 
   const promise = fn()
     .then((value) => {
       cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+      degraded.delete(key);
       return value;
+    })
+    .catch((err) => {
+      // Modo degradado: si la fuente falla y hay un dato anterior reciente, se sirve ese dato marcado como antiguo.
+      if (hit && now - hit.expiresAt < STALE_MAX_MS) {
+        degraded.set(key, { since: degraded.get(key)?.since ?? now, lastError: err instanceof Error ? err.message : String(err) });
+        return hit.value as T;
+      }
+      throw err;
     })
     .finally(() => {
       inflight.delete(key);

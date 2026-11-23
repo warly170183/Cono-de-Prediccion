@@ -22,6 +22,8 @@ import { TradeOptionsView } from './components/TradeOptionsView.tsx';
 import { RotationView } from './components/RotationView.tsx';
 import { JournalView } from './components/JournalView.tsx';
 import { MicroView } from './components/MicroView.tsx';
+import { HealthView } from './components/HealthView.tsx';
+import { PaperView } from './components/PaperView.tsx';
 import { ArchitectureView } from './components/ArchitectureView.tsx';
 import { RadarPanel } from './components/RadarPanel.tsx';
 
@@ -33,6 +35,8 @@ const NAV_ITEMS: Array<{ id: NavTab; label: string }> = [
   { id: 'rotation', label: 'Rotación 40' },
   { id: 'journal', label: 'Diario' },
   { id: 'micro', label: 'Microestructura' },
+  { id: 'health', label: 'Salud & Alertas' },
+  { id: 'paper', label: 'Paper' },
   { id: 'architecture', label: 'Arquitectura' },
 ];
 
@@ -608,6 +612,10 @@ export default function App() {
         )}
 
         {tab === 'micro' && <MicroView asset={asset} />}
+
+        {tab === 'health' && <HealthView />}
+
+        {tab === 'paper' && <PaperView />}
 
         {tab === 'architecture' && (
           <ArchitectureView

@@ -48,7 +48,10 @@ import {
 } from './server/microService.ts';
 import { getRotationAnalysis } from './server/rotationService.ts';
 import { IS_PACKAGED } from './server/paths.ts';
-import { backupData, dataStatus, heartbeat, migrateLegacyData, readSettings, startSession } from './server/storage.ts';
+import { computeHealth } from './server/health.ts';
+import { getAlertSettings, publicAlertSettings, runAlertChecks, saveAlertSettings, sendAlert } from './server/alerts.ts';
+import { DEFAULT_PAPER, simulatePaper } from './server/paperTrading.ts';
+import { backupData, updateSettings, dataStatus, heartbeat, migrateLegacyData, readSettings, startSession } from './server/storage.ts';
 import {
   closeRegisteredTradeOptionManual,
   contextOf,
@@ -335,6 +338,58 @@ async function startServer() {
       console.error('Trade options error:', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to compute trade options' });
     }
+  });
+
+  // Salud del modelo: veredictos de todos los módulos y progreso de la campaña de medición.
+  app.get('/api/model-health', async (_req, res) => {
+    try {
+      res.json(await computeHealth());
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Health failed' });
+    }
+  });
+
+  // Alertas (Telegram / webhook). El token nunca se devuelve a la interfaz.
+  app.get('/api/alerts', (_req, res) => res.json(publicAlertSettings()));
+  app.post('/api/alerts', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' ? v.trim() : undefined);
+    const prox = Number(b.gexProximityPct);
+    saveAlertSettings({
+      enabled: typeof b.enabled === 'boolean' ? b.enabled : undefined,
+      telegramToken: str(b.telegramToken),
+      telegramChatId: str(b.telegramChatId),
+      webhookUrl: str(b.webhookUrl),
+      gexProximityPct: Number.isFinite(prox) && prox > 0 && prox <= 5 ? prox : undefined,
+      events: typeof b.events === 'object' && b.events ? (b.events as never) : undefined,
+    } as never);
+    res.json(publicAlertSettings());
+  });
+  app.post('/api/alerts/test', async (_req, res) => {
+    const r = await sendAlert('Aviso de prueba: las alertas funcionan.', { ...getAlertSettings(), enabled: true });
+    res.json(r);
+  });
+
+  // Paper trading: cartera simulada con las propuestas registradas y límites de riesgo.
+  app.get('/api/paper', (_req, res) => {
+    const cfg = { ...DEFAULT_PAPER, ...(readSettings().paper ?? {}) };
+    res.json(simulatePaper(loadRegisteredTradeOptions(), cfg));
+  });
+  app.post('/api/paper/config', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const num = (v: unknown, lo: number, hi: number) => (Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Number(v) : undefined);
+    const patch = {
+      startEquity: num(b.startEquity, 100, 1e9),
+      riskPct: num(b.riskPct, 0.05, 5),
+      maxDailyRiskPct: num(b.maxDailyRiskPct, 0.1, 20),
+      maxDirRiskPct: num(b.maxDirRiskPct, 0.1, 20),
+      maxPerAsset: num(b.maxPerAsset, 1, 5),
+      maxDrawdownStopPct: num(b.maxDrawdownStopPct, 1, 90),
+      minVerdict: ['validada', 'prometedora', 'todas'].includes(String(b.minVerdict)) ? (b.minVerdict as never) : undefined,
+    };
+    const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    updateSettings({ paper: { ...(readSettings().paper ?? {}), ...clean } });
+    res.json(simulatePaper(loadRegisteredTradeOptions(), { ...DEFAULT_PAPER, ...(readSettings().paper ?? {}) }));
   });
 
   // Estado de los datos guardados: dónde están, cuántos hay, huecos por apagados y copias de seguridad.
@@ -713,6 +768,9 @@ async function startServer() {
       void startMicroCollector(micro.asset).catch((e) => console.warn('No se pudo reanudar el colector micro:', e));
     }
     startAutoJournalScheduler();
+    setInterval(() => {
+      void runAlertChecks().catch((e) => console.warn('Alert check failed:', e));
+    }, 15 * 60_000);
     setTimeout(() => {
       void ensureAutoTradeOptionsForAllAssets();
     }, 12_000);
