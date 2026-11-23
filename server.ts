@@ -768,6 +768,13 @@ async function startServer() {
       void startMicroCollector(micro.asset).catch((e) => console.warn('No se pudo reanudar el colector micro:', e));
     }
     startAutoJournalScheduler();
+    // La rotación descarga ~40 monedas (minutos): se precalcula al arrancar y se renueva cada 6 h para que la pestaña abra al instante.
+    setTimeout(() => {
+      void getRotationAnalysis(false).catch((e) => console.warn('Rotación: precálculo fallido:', e));
+    }, 60_000);
+    setInterval(() => {
+      void getRotationAnalysis(false).catch((e) => console.warn('Rotación: renovación fallida:', e));
+    }, 6 * 3_600_000 + 60_000);
     setInterval(() => {
       void runAlertChecks().catch((e) => console.warn('Alert check failed:', e));
     }, 15 * 60_000);

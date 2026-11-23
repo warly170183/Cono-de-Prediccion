@@ -309,6 +309,32 @@ export function simulateGarchPaths(
   const resids = fit.stdResids;
   const rLen = resids.length;
 
+  // Corrección de convexidad CONDICIONAL: cada paso resta κ(σ_t) = ln E[exp(σ_t·z)], de modo que
+  // E[P_{t+1}/P_t | pasado] = 1 en cada camino. La corrección marginal anterior (un único ajuste por paso,
+  // promediado entre caminos) no basta con efecto apalancamiento: los caminos de alta volatilidad quedaban
+  // infracorregidos y los de baja sobrecorregidos, y eso sesgaba toda evaluación de stops y objetivos.
+  const kappaGrid: number[] = [];
+  const kappaSig: number[] = [];
+  if (martingaleAdjust) {
+    let maxSig = Math.sqrt(hLast) / 100;
+    for (const v of fit.condVolPct) maxSig = Math.max(maxSig, v / 100);
+    maxSig *= 3;
+    for (let k = 0; k <= 60; k++) {
+      const sg = (maxSig * k) / 60;
+      let acc = 0;
+      for (let j = 0; j < rLen; j++) acc += Math.exp(sg * resids[j]);
+      kappaSig.push(sg);
+      kappaGrid.push(Math.log(acc / rLen));
+    }
+  }
+  const kappa = (sg: number): number => {
+    if (!martingaleAdjust) return 0;
+    const pos = (sg / kappaSig[kappaSig.length - 1]) * 60;
+    const k0 = Math.min(59, Math.max(0, Math.floor(pos)));
+    const f = Math.min(1, Math.max(0, pos - k0));
+    return kappaGrid[k0] * (1 - f) + kappaGrid[k0 + 1] * f;
+  };
+
   const cumPaths: Float64Array[] = new Array(N);
   for (let i = 0; i < N; i++) {
     const path = new Float64Array(H);
@@ -321,24 +347,10 @@ export function simulateGarchPaths(
       const z = resids[Math.floor(rng() * rLen)];
       const rPct = Math.sqrt(h) * z;
       prevR = rPct;
-      cum += rPct / 100.0;
+      cum += rPct / 100.0 - kappa(Math.sqrt(h) / 100.0);
       path[step] = cum;
     }
     cumPaths[i] = path;
-  }
-
-  if (martingaleAdjust) {
-    // adj[h] = -ln(mean(exp(cum[:, h]))) so E[S_{t+h}/S_t] = 1
-    for (let step = 0; step < H; step++) {
-      let sumExp = 0;
-      for (let i = 0; i < N; i++) {
-        sumExp += Math.exp(cumPaths[i][step]);
-      }
-      const adj = -Math.log(sumExp / N);
-      for (let i = 0; i < N; i++) {
-        cumPaths[i][step] += adj;
-      }
-    }
   }
 
   return cumPaths;
@@ -1205,6 +1217,27 @@ export function simulateBarrierTrade(
 }
 
 /**
+ * Sesgo bruto de la simulación con deriva NEUTRA (control variate).
+ * Con precios martingala, cualquier regla de salida tiene esperanza bruta cero. La simulación acredita las
+ * salidas EN el nivel (no en el cierre que lo sobrepasa) con retornos horarios de colas pesadas y asimetría
+ * negativa: un stop que se salta con un tramo de -3 % se acredita como -sl, y eso regala al largo y penaliza al corto
+ * (±0,1 % medido con datos reales de BTC). Ese sesgo es un artefacto del modelo, no una ventaja operable; se
+ * resta para que, sin deriva, el EV sea exactamente -coste y solo la deriva/evidencia aporte ventaja.
+ */
+export function neutralGrossBias(
+  cumPaths: Float64Array[],
+  H: number,
+  isLong: boolean,
+  sl: number,
+  tp: number,
+  sigmaStep: number,
+): number {
+  let sum = 0;
+  for (let i = 0; i < cumPaths.length; i++) sum += simulateBarrierTrade(cumPaths[i], H, isLong, sl, tp, 0, sigmaStep).gross;
+  return sum / Math.max(1, cumPaths.length);
+}
+
+/**
  * Computes Stop/Target EV/Kelly grid on martingale-adjusted GARCH paths + technical features + contrarian events (trades.py).
  */
 export function computeTradeGrid(asset: AssetId, candles1h: Candle[]): TradeAnalysisOutput {
@@ -1225,8 +1258,15 @@ export function computeTradeGrid(asset: AssetId, candles1h: Candle[]): TradeAnal
   const SLs = [0.01, 0.015, 0.02, 0.03, 0.04];
   const TPs = [0.01, 0.02, 0.03, 0.04, 0.06, 0.08];
 
+  const biasCache = new Map<string, number>();
   const evalCombo = (dir: 'long' | 'short', sl: number, tp: number, driftPerHour = 0) => {
     const isLong = dir === 'long';
+    const bKey = `${dir}:${sl}:${tp}`;
+    let bias0 = biasCache.get(bKey);
+    if (bias0 === undefined) {
+      bias0 = neutralGrossBias(cumPaths, H, isLong, sl, tp, sigmaStep);
+      biasCache.set(bKey, bias0);
+    }
     let winCnt = 0;
     let lossCnt = 0;
     let toCnt = 0;
@@ -1240,7 +1280,7 @@ export function computeTradeGrid(asset: AssetId, candles1h: Candle[]): TradeAnal
       if (sim.outcome === 'win') winCnt++;
       else if (sim.outcome === 'loss') lossCnt++;
       else toCnt++;
-      const out = sim.gross - COST;
+      const out = sim.gross - bias0 - COST;
       const rMult = out / sl;
       sumOut += out;
       sumOut2 += out * out;
@@ -1487,13 +1527,14 @@ export function simulateCustomTrade(params: {
   let sumOut2 = 0;
   let sumX = 0;
   let sumX2 = 0;
+  const bias0 = neutralGrossBias(cumPaths, H, isLong, sl, tp, sigmaStep);
 
   for (let i = 0; i < N; i++) {
     const sim = simulateBarrierTrade(cumPaths[i], H, isLong, sl, tp, driftPerHour, sigmaStep);
     if (sim.outcome === 'win') winCnt++;
     else if (sim.outcome === 'loss') lossCnt++;
     else toCnt++;
-    const out = sim.gross - cost;
+    const out = sim.gross - bias0 - cost;
     const rMult = out / sl;
     sumOut += out;
     sumOut2 += out * out;
@@ -2189,7 +2230,8 @@ function fitLogisticL2(X: number[][], y: number[], C = 0.05): { w: number[]; b: 
     sd[j] = Math.sqrt(v / n) + 1e-9;
   }
 
-  const Z = X.map((row) => row.map((val, j) => (val - mu[j]) / sd[j]));
+  // Variables acotadas a ±3 desviaciones: un z-score extremo hoy no debe extrapolar la recta a probabilidades absurdas.
+  const Z = X.map((row) => row.map((val, j) => Math.max(-3, Math.min(3, (val - mu[j]) / sd[j]))));
   const w = new Array<number>(p).fill(0);
   let b = 0;
   const reg = 1 / Math.max(1e-4, C * n);
@@ -2218,7 +2260,7 @@ function fitLogisticL2(X: number[][], y: number[], C = 0.05): { w: number[]; b: 
 function predictLogistic(model: { w: number[]; b: number; mu: number[]; sd: number[] }, x: number[]): number {
   let z = model.b;
   for (let j = 0; j < x.length; j++) {
-    z += model.w[j] * ((x[j] - model.mu[j]) / model.sd[j]);
+    z += model.w[j] * Math.max(-3, Math.min(3, (x[j] - model.mu[j]) / model.sd[j]));
   }
   return 1 / (1 + Math.exp(-Math.max(-20, Math.min(20, z))));
 }
@@ -2376,9 +2418,11 @@ export function computeBiasAnalysis(params: {
   }
 
   // Models A (price/vol) and B (price/vol + derivatives) P(up) at 1d and 3d
-  const fitAndPredict = (h: 1 | 3, includeDerivs: boolean): { pUp: number | null; base: number | null } => {
-    const X: number[][] = [];
-    const y: number[] = [];
+  const fitAndPredict = (
+    h: 1 | 3,
+    includeDerivs: boolean,
+  ): { pUp: number | null; base: number | null; skill: number | null; raw: number | null } => {
+    const rows: Array<{ i: number; x: number[]; y: number }> = [];
     let xNow: number[] | null = null;
 
     for (let i = 20; i < n; i++) {
@@ -2399,16 +2443,40 @@ export function computeBiasAnalysis(params: {
       if (i === n - 1) {
         xNow = feats;
       } else if (i < n - h) {
-        X.push(feats);
-        y.push(Math.log(closes[i + h] / closes[i]) > 0 ? 1 : 0);
+        rows.push({ i, x: feats, y: Math.log(closes[i + h] / closes[i]) > 0 ? 1 : 0 });
       }
     }
 
-    if (!xNow || X.length < 25) return { pUp: null, base: null };
-    const mdl = fitLogisticL2(X, y, 0.05);
+    if (!xNow || rows.length < 25) return { pUp: null, base: null, skill: null, raw: null };
+    const baseRate = mean(rows.map((r) => r.y));
+    const mdl = fitLogisticL2(rows.map((r) => r.x), rows.map((r) => r.y), 0.05);
+    const raw = predictLogistic(mdl, xNow);
+
+    // Habilidad fuera de muestra: ventana expansiva, sin mirar el futuro (la etiqueta de la fila i se conoce en i+h).
+    let brierM = 0;
+    let brierB = 0;
+    let cnt = 0;
+    const testStart = Math.max(40, Math.floor(rows.length * 0.5));
+    for (let t = testStart; t < rows.length; t += 2) {
+      const cutoff = rows[t].i;
+      const train = rows.filter((r) => r.i + h <= cutoff);
+      if (train.length < 25) continue;
+      const m = fitLogisticL2(train.map((r) => r.x), train.map((r) => r.y), 0.05);
+      const pr = predictLogistic(m, rows[t].x);
+      const pb = mean(train.map((r) => r.y));
+      brierM += (pr - rows[t].y) ** 2;
+      brierB += (pb - rows[t].y) ** 2;
+      cnt++;
+    }
+    const skill = cnt >= 15 && brierB > 0 ? 1 - brierM / brierB : null;
+    // Encogimiento hacia la tasa base: sin habilidad demostrada fuera de muestra, la mejor estimación es la base.
+    const wgt = skill === null ? 0 : Math.max(0, Math.min(1, skill * 8));
+    const shrunk = baseRate + wgt * (raw - baseRate);
     return {
-      pUp: Number((predictLogistic(mdl, xNow) * 100).toFixed(1)),
-      base: Number((mean(y) * 100).toFixed(1)),
+      pUp: Number((shrunk * 100).toFixed(1)),
+      base: Number((baseRate * 100).toFixed(1)),
+      skill: skill === null ? null : Number((skill * 100).toFixed(1)),
+      raw: Number((raw * 100).toFixed(1)),
     };
   };
 
@@ -2427,6 +2495,8 @@ export function computeBiasAnalysis(params: {
       A3: a3.pUp,
       B3: b3.pUp,
       base3: a3.base,
+      skill: { A1: a1.skill, B1: b1.skill, A3: a3.skill, B3: b3.skill },
+      raw: { A1: a1.raw, B1: b1.raw, A3: a3.raw, B3: b3.raw },
     },
     rules,
   };

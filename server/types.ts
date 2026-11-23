@@ -226,6 +226,10 @@ export interface BiasAnalysisOutput {
     A3: number | null;
     B3: number | null;
     base3: number | null;
+    /** Habilidad fuera de muestra (% de mejora del Brier frente a la tasa base; ≤0 = sin habilidad). */
+    skill?: Record<'A1' | 'B1' | 'A3' | 'B3', number | null>;
+    /** Probabilidad del modelo sin encoger. */
+    raw?: Record<'A1' | 'B1' | 'A3' | 'B3', number | null>;
   };
   rules: BiasRuleResult[];
 }

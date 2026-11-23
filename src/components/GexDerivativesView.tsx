@@ -597,6 +597,12 @@ export const GexDerivativesView: React.FC<Props> = ({ asset, readings, gex, onSe
               </div>
             </div>
 
+            {bias.p_up.skill && (
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Habilidad fuera de muestra (mejora del Brier frente a la tasa base) · 1 d: A {bias.p_up.skill.A1 === null ? '—' : `${bias.p_up.skill.A1.toFixed(1)} %`}, B {bias.p_up.skill.B1 === null ? '—' : `${bias.p_up.skill.B1.toFixed(1)} %`} · 3 d: A {bias.p_up.skill.A3 === null ? '—' : `${bias.p_up.skill.A3.toFixed(1)} %`}, B {bias.p_up.skill.B3 === null ? '—' : `${bias.p_up.skill.B3.toFixed(1)} %`}. Con habilidad ≤ 0 la probabilidad mostrada es la tasa base: el modelo no demuestra predecir mejor que el azar.
+              </p>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>

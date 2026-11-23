@@ -30,6 +30,7 @@ import {
   computeGex,
   fitGjrGarch,
   simulateBarrierTrade,
+  neutralGrossBias,
   simulateGarchPaths,
 } from './quantEngine.ts';
 
@@ -294,13 +295,14 @@ function evaluateOnPaths(
   let sumOut = 0;
   let sumX = 0;
   let sumX2 = 0;
+  const bias0 = neutralGrossBias(cumPaths, horizon, isLong, sl, tp, sigmaStep);
 
   for (let i = 0; i < N; i++) {
     const sim = simulateBarrierTrade(cumPaths[i], horizon, isLong, sl, tp, driftPerHour, sigmaStep);
     if (sim.outcome === 'win') winCnt++;
     else if (sim.outcome === 'loss') lossCnt++;
     else toCnt++;
-    const out = sim.gross - ROUND_TRIP_COST;
+    const out = sim.gross - bias0 - ROUND_TRIP_COST;
     const rMult = out / sl;
     sumOut += out;
     sumX += rMult;

@@ -174,7 +174,7 @@ async function loadUniverseMatrix(forceRefresh: boolean) {
   );
 
   cachedMatrix = {
-    expiresAt: Date.now() + 30 * 60_000,
+    expiresAt: Date.now() + 6 * 3_600_000,
     symbols,
     dates,
     prices,
@@ -448,7 +448,7 @@ export async function getRotationAnalysis(forceRefresh = false): Promise<Rotatio
       universe_snapshots: universeSnapshotInfo(),
     };
 
-    cachedRotation = { expiresAt: Date.now() + 30 * 60_000, data: result };
+    cachedRotation = { expiresAt: Date.now() + 6 * 3_600_000, data: result };
     return result;
   })().finally(() => {
     inflightRotation = null;
