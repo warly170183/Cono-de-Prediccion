@@ -558,7 +558,7 @@ export const GexDerivativesView: React.FC<Props> = ({ asset, readings, gex, onSe
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-mono tabular-nums">
               <div className="p-4 rounded-md bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800">
                 <div className="font-sans text-xs text-slate-500 dark:text-slate-400">
-                  Probabilidad P(alcista) a 1 día · Base histórica {bias.p_up.base1 !== null ? `${bias.p_up.base1.toFixed(1)} %` : '—'}
+                  Probabilidad P(alcista) a 1 día
                 </div>
                 <div className="mt-2 flex items-baseline gap-6">
                   <div>
@@ -566,19 +566,25 @@ export const GexDerivativesView: React.FC<Props> = ({ asset, readings, gex, onSe
                     <div className="text-lg font-semibold text-slate-900 dark:text-slate-50">
                       {bias.p_up.A1 !== null ? `${bias.p_up.A1.toFixed(1)} %` : '—'}
                     </div>
+                    {bias.p_up.bases?.A1 != null && (
+                      <div className="font-sans text-[10px] text-slate-500 dark:text-slate-400">base {bias.p_up.bases.A1.toFixed(1)} %</div>
+                    )}
                   </div>
                   <div>
                     <div className="font-sans text-[11px] text-slate-500 dark:text-slate-400">Modelo B (+ Derivados)</div>
                     <div className="text-lg font-semibold text-sky-600 dark:text-sky-400">
                       {bias.p_up.B1 !== null ? `${bias.p_up.B1.toFixed(1)} %` : '—'}
                     </div>
+                    {bias.p_up.bases?.B1 != null && (
+                      <div className="font-sans text-[10px] text-slate-500 dark:text-slate-400">base {bias.p_up.bases.B1.toFixed(1)} %</div>
+                    )}
                   </div>
                 </div>
               </div>
 
               <div className="p-4 rounded-md bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800">
                 <div className="font-sans text-xs text-slate-500 dark:text-slate-400">
-                  Probabilidad P(alcista) a 3 días · Base histórica {bias.p_up.base3 !== null ? `${bias.p_up.base3.toFixed(1)} %` : '—'}
+                  Probabilidad P(alcista) a 3 días
                 </div>
                 <div className="mt-2 flex items-baseline gap-6">
                   <div>
@@ -586,12 +592,18 @@ export const GexDerivativesView: React.FC<Props> = ({ asset, readings, gex, onSe
                     <div className="text-lg font-semibold text-slate-900 dark:text-slate-50">
                       {bias.p_up.A3 !== null ? `${bias.p_up.A3.toFixed(1)} %` : '—'}
                     </div>
+                    {bias.p_up.bases?.A3 != null && (
+                      <div className="font-sans text-[10px] text-slate-500 dark:text-slate-400">base {bias.p_up.bases.A3.toFixed(1)} %</div>
+                    )}
                   </div>
                   <div>
                     <div className="font-sans text-[11px] text-slate-500 dark:text-slate-400">Modelo B (+ Derivados)</div>
                     <div className="text-lg font-semibold text-sky-600 dark:text-sky-400">
                       {bias.p_up.B3 !== null ? `${bias.p_up.B3.toFixed(1)} %` : '—'}
                     </div>
+                    {bias.p_up.bases?.B3 != null && (
+                      <div className="font-sans text-[10px] text-slate-500 dark:text-slate-400">base {bias.p_up.bases.B3.toFixed(1)} %</div>
+                    )}
                   </div>
                 </div>
               </div>

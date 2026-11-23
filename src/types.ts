@@ -216,6 +216,7 @@ export interface BiasAnalysisOutput {
     skill?: Record<'A1' | 'B1' | 'A3' | 'B3', number | null>;
     /** Probabilidad del modelo sin encoger. */
     raw?: Record<'A1' | 'B1' | 'A3' | 'B3', number | null>;
+    bases?: Record<'A1' | 'B1' | 'A3' | 'B3', number | null>;
   };
   rules: Array<{
     rule: string;

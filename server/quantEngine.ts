@@ -2497,6 +2497,7 @@ export function computeBiasAnalysis(params: {
       base3: a3.base,
       skill: { A1: a1.skill, B1: b1.skill, A3: a3.skill, B3: b3.skill },
       raw: { A1: a1.raw, B1: b1.raw, A3: a3.raw, B3: b3.raw },
+      bases: { A1: a1.base, B1: b1.base, A3: a3.base, B3: b3.base },
     },
     rules,
   };
