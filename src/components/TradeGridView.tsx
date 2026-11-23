@@ -110,6 +110,9 @@ export const TradeGridView: React.FC<Props> = ({ data }) => {
           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
             Combos con EV &gt; 0 significativo: {data.n_sig} / {data.n_combos}
           </div>
+          <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            Sin ventaja de dirección, el EV de cada combo es −coste por construcción: lo esperable aquí es ≈ 0.
+          </div>
         </div>
 
         {data.top
@@ -120,7 +123,7 @@ export const TradeGridView: React.FC<Props> = ({ data }) => {
               className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-4"
             >
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                Menor fricción {setup.dir === 'long' ? 'Largo' : 'Corto'} (SL {setup.sl_pct}% / TP {setup.tp_pct}%)
+                Menor coste relativo {setup.dir === 'long' ? 'Largo' : 'Corto'} (SL {setup.sl_pct}% / TP {setup.tp_pct}%)
               </div>
               <div className="mt-1.5 text-xl font-display font-semibold font-mono tabular-nums text-slate-900 dark:text-slate-50">
                 EV {setup.ev_pct >= 0 ? '+' : ''}
